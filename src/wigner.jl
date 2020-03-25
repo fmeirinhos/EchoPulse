@@ -1,44 +1,60 @@
-using FFTW, NFFT
-using Plots
+import LinearAlgebra: checksquare
+import FFTW: fft, fftfreq
+import NFFT: nfft, NFFTPlan
+import DSP: tukey
+using Plots, LaTeXStrings
 
-# Wigner transform ρ(X, ω) = i ∫dt e^{i \omega t} ρ(X + t/2, X - t/2)
-function wigner_transform(x; Nf=nothing)
+# Wigner transform ρ(ω, T) = i ∫dt e^{-i ω t} ρ(T + t/2, T - t/2)
+function wigner_transform(x; fourier=true, Nf=nothing, α=nothing)
+  checksquare(x)
+
   Nt = size(x, 1)
-  tfr = zeros(ComplexF64, Nt, Nt)
+  x′ = zero(x)
   
-  # Change of basis
-  for tᵢ = 1:Nt           
-    τ_max = minimum([tᵢ - 1, Nt - tᵢ, round(Int, Nt / 2) - 1])
-    τ = -τ_max:τ_max
-    is = 1 .+ rem.(Nt .+ τ, Nt)
+  # Change of basis x(t1, t2) → x′((t1 + t2)/2, t1 - t2)
+  for tᵢ = 1:Nt
+    # For a certain tᵢ ≡ (t1 + t2)/2, τ ≡ (t1 - t2) can be at most τ_max
+    τ_max = minimum([tᵢ - 1, Nt - tᵢ, Nt ÷ 2 - 1])
+    τs = -τ_max:τ_max
+    is = 1 .+ rem.(Nt .+ τs, Nt)
     
-    for (i, τᵢ) in zip(is, τ)
-      tfr[i,tᵢ] = x[tᵢ+τᵢ,tᵢ-τᵢ]
+    for (i, τᵢ) in zip(is, τs)
+      x′[i,tᵢ] = x[tᵢ+τᵢ,tᵢ-τᵢ]
     end
     
-    τ = round(Int, Nt / 2); 
+    τ = Nt ÷ 2 
     if tᵢ <= Nt - τ && tᵢ >= τ + 1
-      tfr[τ+1,tᵢ] = 0.5 * (x[tᵢ+τ,tᵢ-τ] + x[tᵢ-τ,tᵢ+τ])
+      x′[τ+1,tᵢ] = 0.5 * (x[tᵢ+τ,tᵢ-τ] + x[tᵢ-τ,tᵢ+τ])
     end
   end
-  
+
+  # Wrap signal
+  if !isnothing(α)
+    w = tukey(Nt, α)
+    x′ = mapslices(c-> c.* w, x′, dims=[1])
+  end
+
+  if !fourier
+    return trf
+  end
+
   # Fourier Transform
   if isnothing(Nf)
     for tᵢ=1:Nt
-      tfr[:,tᵢ]=fft(tfr[:,tᵢ])
+      x′[:,tᵢ] = fft(x′[:,tᵢ])
     end
-    return 1.0im * tfr
+    return 1.0im * x′
   else
-    tfr′ = zeros(ComplexF64,Nf,Nt)
+    x′′ = zeros(ComplexF64,Nf,Nt)
+    mid = isodd(Nt) ? Nt ÷ 2 + 1 : Nt ÷ 2
 
     p = NFFTPlan(fftfreq(Nf), Nt)
 
-    for tᵢ=1:Nt      
-      mid = isodd(Nt) ? Nt ÷ 2 + 1 : Nt ÷ 2
-      tfr′[:,tᵢ]= nfft(p, [tfr[mid+1:end,tᵢ]; tfr[1:mid,tᵢ]])
+    for tᵢ=1:Nt
+      x′′[:,tᵢ] = nfft(p, [x′[mid+1:end,tᵢ]; x′[1:mid,tᵢ]])
     end
     
-    return 1.0im * tfr′
+    return 1.0im * x′′
   end
 end
 
@@ -62,9 +78,10 @@ function wigner_transform1(A::Matrix)
 end
 
 function wigner_plot!(ρ, ts; kwargs...)  
-  ωs = fftfreq(size(ρ,1)) / (ts[2] - ts[1]) * 2π
+  ωs = -2π * fftfreq(size(ρ,1)) / (ts[2] - ts[1]) / 2
   is = sortperm(ωs)
-  heatmap(ts, ωs[is], real(ρ)[is,:]; 
+
+  heatmap(ts, ωs[is], ρ[is,:]; 
     xlabel=L"$T$", 
     ylabel=L"$\omega$",
     kwargs...)
