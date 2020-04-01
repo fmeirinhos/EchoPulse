@@ -20,7 +20,8 @@ Wigner function tells us (roughly) how the spectral density changes in time.
   - Number of ω points (`Nf`): Equidistant number of frequencies.
   Defaults to `size(x,1)`.
   - Transform opt (`transform`): Whether to map `ts` to an equidistant grid.
-  Defaults to `true`
+  Defaults to `true` (because currently the working FFTs need an equididistant 
+  time grid)
   - Fourier opt (`fourier`): Whether to Fourier transform. Defaults to `true`
 
 
@@ -52,10 +53,17 @@ function wigner_transform(x; ts=nothing, Nf=size(x,1),
   x′ = zero(x)
 
   for icol=1:Nt
-    tᵢ = ts_[icol]
+    tᵢ = ts_[icol] # Binning of ts
 
     # For a certain tᵢ ≡ (t1 + t2)/2, τ ≡ (t1 - t2) can be at most τ_max
     τ_max = minimum([tᵢ-1, Nt-tᵢ, Nt÷2-1])
+
+    # NOTE: Is the binning done correctly??
+    # τ_max = minimum([icol-1, Nt-icol, Nt÷2-1])
+    # is_ = [icol, Nt-icol+1, Nt÷2]
+    # τ_max = is_[argmin(ts[is_])] - 1
+    # x′[i,icol] = x[ts_[icol+τᵢ],ts_[icol-τᵢ]]
+
     τs = -τ_max:τ_max
     is = 1 .+ rem.(Nt.+τs, Nt)
 
