@@ -1,6 +1,6 @@
 import LinearAlgebra: checksquare
 import FFTW: fft, fftfreq
-import FastTransforms: nufft1
+import FastTransforms: nufft1, nufft2
 import NFFT: nfft, NFFTPlan
 using Plots, LaTeXStrings
 
@@ -75,11 +75,15 @@ function wigner_transform(x; ts=nothing, Nf=size(x,1),
   if Nf != Nt # Different frequency sampling
     @assert transform "Different frequency sampling requires transformation"
 
+    # for tᵢ=1:Nt
+    #   x′[:,tᵢ] = nufft2(x′[:,tᵢ], fftfreq(Nt, Nt/Nf), 1e-12)
+    # end
+
     x′′ = x′
     x′ = zeros(eltype(x′),Nf,Nt)
 
-    mid = isodd(Nt) ? Nt ÷ 2 + 1 : Nt ÷ 2
-    p = NFFTPlan(fftfreq(Nf, 0.1), Nt)
+    mid = isodd(Nt) ? Nt÷2 + 1 : Nt÷2
+    p = NFFTPlan(fftfreq(Nf, 1.0), Nt)
 
     for tᵢ=1:Nt
       x′[:,tᵢ] = nfft(p, [x′′[mid+1:end,tᵢ]; x′′[1:mid,tᵢ]])
