@@ -1,6 +1,6 @@
 import LinearAlgebra: checksquare
 import FFTW: fft, fftfreq
-import FastTransforms: nufft1, nufft2
+# import FastTransforms: nufft1, nufft2
 import NFFT: nfft, NFFTPlan
 using Plots, LaTeXStrings
 
@@ -19,36 +19,22 @@ Wigner function tells us (roughly) how the spectral density changes in time.
   - Time-grid (`ts`): Defaults to a `UnitRange` time-grid
   - Number of ω points (`Nf`): Equidistant number of frequencies.
   Defaults to `size(x,1)`.
-  - Transform opt (`transform`): Whether to map `ts` to an equidistant grid.
-  Defaults to `true` (because currently the working FFTs need an equididistant 
-  time grid)
   - Fourier opt (`fourier`): Whether to Fourier transform. Defaults to `true`
-
 
 ## References:
 https://en.wikipedia.org/wiki/Wigner_distribution_function
 http://tftb.nongnu.org
 """
-function wigner_transform(x; ts=nothing, Nf=size(x,1), 
-  fourier=true, transform=true)
-
-  # Maps the indices of ts to an equidistant time-grid
-  function equidistant_map(y)
-    equidistant_y = range(y[1], stop=y[end], length=length(y))
-    return searchsortedlast.(Ref(equidistant_y), y)
-  end
+function wigner_transform(x; ts=1:size(x,1), Nf=size(x,1), fourier=true)
 
   checksquare(x)
 
-  # Time-grid
   Nt = size(x, 1)
-  if !isnothing(ts) && transform
-    ts_ = equidistant_map(ts)
-  else
-    ts_ = 1:Nt
-  end
-  if !isnothing(ts) @assert length(ts) == Nt end
   
+  # Bin time-grid `ts`
+  @assert length(ts) == Nt
+  ts_ = equidistant_map(ts)
+
   # Change of basis x(t1, t2) → x′(t1 - t2, (t1 + t2)/2)
   x′ = zero(x)
 
@@ -79,10 +65,7 @@ function wigner_transform(x; ts=nothing, Nf=size(x,1),
 
   if !fourier return x′ end
 
-  # TODO: use just FastTransforms.jl
   if Nf != Nt # Different frequency sampling
-    @assert transform "Different frequency sampling requires transformation"
-
     # for tᵢ=1:Nt
     #   x′[:,tᵢ] = nufft2(x′[:,tᵢ], fftfreq(Nt, Nt/Nf), 1e-12)
     # end
@@ -96,24 +79,28 @@ function wigner_transform(x; ts=nothing, Nf=size(x,1),
     for tᵢ=1:Nt
       x′[:,tᵢ] = nfft(p, [x′′[mid+1:end,tᵢ]; x′′[1:mid,tᵢ]])
     end
-  elseif transform # Equidistant FFT
+  else # Equidistant FFT
     for tᵢ=1:Nt
       x′[:,tᵢ] = fft(x′[:,tᵢ])
     end
-  else # Non-equidistant FFT in time
-    @warn "Experimental feature"
-    # Map ts to non-equidistant 0:(N-1)
-    ts_ = ts .- ts[1]
-    ts_ *= (length(ts)-1) / ts_[end]
-
-    for tᵢ=1:Nt
-      x′[:,tᵢ] = nufft1(x′[:,tᵢ], ts_, 1e-12)
-    end
   end
+  # else # Non-equidistant FFT in time
+  #   @warn "Experimental feature. Requires change of basis without binining"
+  #   # Map ts to non-equidistant 0:(N-1)
+  #   ts_ = ts .- ts[1]
+  #   ts_ *= (length(ts)-1) / ts_[end]
+
+  #   for tᵢ=1:Nt
+  #     x′[:,tᵢ] = nufft1(x′[:,tᵢ], ts_, 1e-12)
+  #   end   # Frequencies are equispaced
+  # end
   return 1.0im * x′
 end
 
-function wigner_plot!(ρ, ts; kwargs...)  
+function wigner_plot!(ρ, ts; transform=true, kwargs...)
+  if transform
+    ts = range(ts[1], stop=ts[end], length=length(ts))
+  end
   ωs = -2π * fftfreq(size(ρ,1)) / ((ts[end]-ts[1]) / (length(ts)-1)) / 2
   is = sortperm(ωs)
 
@@ -121,6 +108,12 @@ function wigner_plot!(ρ, ts; kwargs...)
     xlabel=L"$T$", 
     ylabel=L"$\omega$",
     kwargs...)
+end
+
+# Maps the indices of ts to an equidistant time-grid
+function equidistant_map(x)
+  equidistant_y = range(x[1], stop=x[end], length=length(x))
+  return searchsortedlast.(Ref(equidistant_y), x)
 end
 
 # Deprecated
