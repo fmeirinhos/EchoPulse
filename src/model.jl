@@ -1,0 +1,257 @@
+using Parameters
+using NCA
+
+@with_kw mutable struct PhotonAssitedModel
+  # single impurity Anderson model parameters
+  V₀::Float64     # hybridization strength
+  ε₀f::Float64    # f-electron ground state energy
+  σ::Float64      # c-electron lorenztian bandwidth
+
+  # pulse parameters
+  Γ₀::Float64     # light-matter coupling strength
+  ω₀::Float64     # photon ground state energy
+  δ₀::Float64     # photon artificial width
+
+  tc::Float64     # peak arrival time
+  Ω::Float64      # frequency bandwidth of the pulse
+  ξ=nothing       # pulse shape
+
+  Γ::Float64      # pump and loss strength
+  λ=nothing       # loss function
+  γ=nothing       # pump function
+
+  hᵧ=nothing      # photon field Hamiltonian
+end
+
+struct ProblemData
+  GᶜL::GreenFunction
+  GᶜG::GreenFunction
+  GᶠL::GreenFunction
+  GᶠG::GreenFunction
+  GᵇL::GreenFunction
+  GᵇG::GreenFunction
+  GᵞL::GreenFunction
+  GᵞG::GreenFunction
+  
+  Gᶜ˥m::Vector{Vector}
+  Gᶜ˥p::Vector{Vector}
+  Gᶠ˥m::Vector{Vector}
+  Gᶠ˥p::Vector{Vector}
+  Gᵇ˥m::Vector{Vector}
+  Gᵇ˥p::Vector{Vector}
+  
+  ΣᶠL::GreenFunction
+  ΣᶠG::GreenFunction
+  ΣᵇL::GreenFunction
+  ΣᵇG::GreenFunction
+  
+  Σᶠ˥p::Vector{Vector}
+  Σᶠ˥m::Vector{Vector}
+  Σᵇ˥p::Vector{Vector}
+  Σᵇ˥m::Vector{Vector}
+  
+  mesh::NCA.MeshType
+  fermi::Vector
+  bose::Vector
+
+  function ProblemData(GᶜL,GᶜG,GᶠL,GᶠG,GᵇL,GᵇG,GᵞL,GᵞG,
+    Gᶜ˥m,Gᶜ˥p,Gᶠ˥m,Gᶠ˥p,Gᵇ˥m,Gᵇ˥p,mesh,fermi,bose)
+
+  new(GᶜL,GᶜG,GᶠL,GᶠG,GᵇL,GᵇG,GᵞL,GᵞG,
+    [Gᶜ˥m],[Gᶜ˥p],[Gᶠ˥m],[Gᶠ˥p],[Gᵇ˥m],[Gᵇ˥p],
+    GreenFunction(zeros(ComplexF64,0,0), Lesser),
+    GreenFunction(zeros(ComplexF64,0,0), Greater),
+    GreenFunction(zeros(ComplexF64,0,0), Lesser),
+    GreenFunction(zeros(ComplexF64,0,0), Greater),
+    [[]],[[]],[[]],[[]],mesh,fermi,bose)
+  end
+end
+
+function f_vert_time(model::PhotonAssitedModel,data::ProblemData,times,t1,t2)
+  @unpack GᶜL,GᶜG,GᶠL,GᶠG,GᵇL,GᵇG,GᵞL,GᵞG,ΣᶠL,ΣᶠG,ΣᵇL,ΣᵇG = data
+  @unpack ε₀f,σ,hᵧ,γ,δ₀ = model
+
+  # Real-time collision integral
+  ∫dt(i,j,A,B) = sign(j-i) * trapz(
+    times[min(i,j):max(i,j)], [A[t1,t] * B[t,t2] for t=min(i,j):max(i,j)])
+
+  calculate_Σ_time!(model, data, t1, t2)
+
+  # conduction electron
+  dGᶜG = -1.0im * (-1.0im * σ * GᶜG[t1,t2])
+  dGᶜL = -1.0im * (-1.0im * σ * GᶜL[t1,t2])
+  
+  # pseudo fermion
+  dGᶠG = -1.0im * (ε₀f * GᶠG[t1,t2] + ∫dt(t2,t1,ΣᶠG,GᶠG))
+  dGᶠL = -1.0im * (ε₀f * GᶠL[t1,t2] + ∫dt(1,t1,ΣᶠG,GᶠL) - ∫dt(1,t2,ΣᶠL,GᶠG))
+   
+  # slave boson
+  dGᵇG = -1.0im * (zero(GᵇG[t1,t2]) + ∫dt(t2,t1,ΣᵇG,GᵇG))
+  dGᵇL = -1.0im * (zero(GᵇL[t1,t2]) + ∫dt(1,t1,ΣᵇG,GᵇL) - ∫dt(1,t2,ΣᵇL,GᵇG))
+
+  # thz pulse
+  dGᵞL = -1.0im * ((hᵧ(times[t1])
+   + 1.0im * γ(times[t1]) - 1.0im * δ₀) * GᵞL[t1,t2])
+  dGᵞG = -1.0im * ((hᵧ(times[t1])
+   + 1.0im * γ(times[t1]) - 1.0im * δ₀) * GᵞG[t1,t2])
+  
+  return [dGᶜL, dGᶜG, dGᶠL, dGᶠG, dGᵇL, dGᵇG, dGᵞL, dGᵞG]
+end
+
+function f_diag_time(model::PhotonAssitedModel,data::ProblemData,times,t1)
+  @unpack GᵞL,GᵞG = data
+  @unpack hᵧ,γ,λ,δ₀ = model
+
+  # commutator
+  ⋊(a,b) = a * b - b * adjoint(a)
+
+  calculate_Σ_time!(model, data, t1, t1)
+
+  # conduction electron
+  dGᶜG = 0.0
+  dGᶜL = 0.0
+
+  # pseudo fermion
+  dGᶠG = 0.0
+  dGᶠL = 0.0
+  
+  # slave boson
+  dGᵇG = 0.0
+  dGᵇL = 0.0
+  
+  # thz pulse
+  dGᵞL = -1.0im * (hᵧ(times[t1]) ⋊ GᵞL[t1,t1] 
+    + 1.0im * γ(times[t1]) * (GᵞL[t1,t1] + GᵞG[t1,t1]))
+  dGᵞG = -1.0im * (hᵧ(times[t1]) ⋊ GᵞG[t1,t1] 
+    + 1.0im * λ(times[t1]) * (GᵞG[t1,t1] - GᵞL[t1,t1]) 
+    + 2.0im * γ(times[t1]) * GᵞG[t1,t1])
+  
+  return [dGᶜL, dGᶜG, dGᶠL, dGᶠG, dGᵇL, dGᵇG, dGᵞL, dGᵞG]
+end
+
+function f_vert_freq(model::PhotonAssitedModel,data::ProblemData,times,t1,t2)
+  @unpack Gᶠ˥m,Gᶠ˥p,Gᵇ˥m,Gᵇ˥p,Σᶠ˥p,Σᶠ˥m,Σᵇ˥p,Σᵇ˥m,mesh,fermi,bose = data
+
+  # Real-frequency collision integral
+  ∫dω(f) = trapz(mesh, f) / (2π)
+
+  # conduction electron
+  dGᶜG = 0.0
+  dGᶜL = 0.0
+  
+  # pseudo fermion
+  dGᶠG = 0.0
+  dGᶠL = -1.0im * (
+    ∫dω(fermi .* (Σᶠ˥m[t1] .* Gᶠ˥m[t2] - Σᶠ˥p[t1] .* Gᶠ˥p[t2])))
+  # dGᶠL = -1.0im * (
+  #   -∫dω((1.-fermi) .* (Σᶠ˥m[t1] .* ⌐(Gᶠ˥p[t2]) - Σᶠ˥p[t1] .* ⌐(Gᶠ˥m[t2]))))
+  
+  # slave boson
+  dGᵇG = 0.0
+  dGᵇL = -1.0im * (
+    -∫dω(bose .* (Σᵇ˥m[t1] .* Gᵇ˥m[t2] - Σᵇ˥p[t1] .* Gᵇ˥p[t2])))
+  # dGᵇL = -1.0im * (
+  #   -∫dω((1.+bose) .* (Σᵇ˥m[t1] .* ⌐(Gᵇ˥p[t2]) - Σᵇ˥p[t1] .* ⌐(Gᵇ˥m[t2]))))
+  
+  # thz pulse
+  dGᵞL = 0.0
+  dGᵞG = 0.0
+  
+  return [dGᶜL, dGᶜG, dGᶠL, dGᶠG, dGᵇL, dGᵇG, dGᵞL, dGᵞG]
+end
+
+function f_diag_freq(model::PhotonAssitedModel,data::ProblemData,times,t1)
+  @unpack Gᶠ˥m,Gᶠ˥p,Gᵇ˥m,Gᵇ˥p,Σᶠ˥p,Σᶠ˥m,Σᵇ˥p,Σᵇ˥m,mesh,fermi,bose = data
+
+  # Real-frequency collision integral
+  ∫dω(f) = trapz(mesh, f) / (2π)
+
+  # conduction electron
+  dGᶜG = 0.0
+  dGᶜL = 0.0
+
+  # pseudo fermion
+  val = -1.0im * (
+    +∫dω(fermi .* (Σᶠ˥m[t1] .* Gᶠ˥m[t1] - Σᶠ˥p[t1] .* Gᶠ˥p[t1]))
+    +∫dω((1 .- fermi) .* (Gᶠ˥m[t1] .* Σᶠ˥m[t1] - Gᶠ˥p[t1] .* Σᶠ˥p[t1])))
+  dGᶠG = val
+  dGᶠL = val
+  
+  # slave boson
+  val = -1.0im * (
+    -∫dω(bose .* (Σᵇ˥m[t1] .* Gᵇ˥m[t1] - Σᵇ˥p[t1] .* Gᵇ˥p[t1]))
+    +∫dω((1 .+ bose) .* (Gᵇ˥m[t1] .* Σᵇ˥m[t1] - Gᵇ˥p[t1] .* Σᵇ˥p[t1])))
+  dGᵇG = val
+  dGᵇL = val
+  
+  # thz pulse
+  dGᵞL = 0.0
+  dGᵞG = 0.0
+  
+  return [dGᶜL, dGᶜG, dGᶠL, dGᶠG, dGᵇL, dGᵇG, dGᵞL, dGᵞG]
+end
+
+function f_line_freq(model::PhotonAssitedModel,data::ProblemData,times,t1)
+  calculate_Σ_time!(model, data, t1, 1)
+  calculate_Σ_freq!(model, data, t1)
+  
+  @unpack ε₀f,σ = model
+  @unpack Gᶜ˥m,Gᶜ˥p,Gᶠ˥m,Gᶠ˥p,Gᵇ˥m,Gᵇ˥p,ΣᶠG,ΣᵇG,Σᶠ˥p,Σᶠ˥m,Σᵇ˥p,Σᵇ˥m = data
+  
+  # Real-time collision integral
+  ∫dt(A,B) = trapz(times, [A[t1,t] .* B[t] for t=1:t1])
+  
+  # conduction electron
+  dGᶜ˥m = -1.0im * (-1.0im .* σ .* Gᶜ˥m[t1])
+  dGᶜ˥p = -1.0im * (-1.0im .* σ .* Gᶜ˥p[t1])
+
+  # pseudo fermion
+  dGᶠ˥m = -1.0im * (ε₀f .* Gᶠ˥m[t1] .+ ∫dt(ΣᶠG, Gᶠ˥m) .+ Σᶠ˥m[t1] .* Gᶠ˥m[1])
+  dGᶠ˥p = -1.0im * (ε₀f .* Gᶠ˥p[t1] .+ ∫dt(ΣᶠG, Gᶠ˥p) .+ Σᶠ˥p[t1] .* Gᶠ˥p[1])
+
+  # slave boson
+  dGᵇ˥m = -1.0im * (zero(Gᵇ˥m[t1]) .+ ∫dt(ΣᵇG, Gᵇ˥m) .+ Σᵇ˥m[t1] .* Gᵇ˥m[1])
+  dGᵇ˥p = -1.0im * (zero(Gᵇ˥p[t1]) .+ ∫dt(ΣᵇG, Gᵇ˥p) .+ Σᵇ˥p[t1] .* Gᵇ˥p[1])
+
+  return [dGᶜ˥m, dGᶜ˥p, dGᶠ˥m, dGᶠ˥p, dGᵇ˥m, dGᵇ˥p]
+end
+
+function calculate_Σ_time!(model::PhotonAssitedModel,data::ProblemData,i,j)
+  @unpack V₀,Γ₀ = model
+  @unpack GᶜL,GᶜG,GᶠL,GᶠG,GᵇL,GᵇG,GᵞL,GᵞG,ΣᶠL,ΣᶠG,ΣᵇL,ΣᵇG = data
+  
+  if size(ΣᶠL,1) < max(i,j) resize!(data, size(GᶜL,1)) end
+  
+  ΣᶠL[i,j] = 1 * GᶜL[i,j] * (V₀^2 + Γ₀^2 * (GᵞL[i,j] + GᵞG[j,i])) * GᵇL[i,j]
+  ΣᶠG[i,j] = 1 * GᶜG[i,j] * (V₀^2 + Γ₀^2 * (GᵞL[i,j] + GᵞG[j,i])) * GᵇG[i,j]
+  ΣᵇL[i,j] = 2 * GᶠL[i,j] * (V₀^2 + Γ₀^2 * (GᵞL[i,j] + GᵞG[j,i])) * GᶜG[j,i]
+  ΣᵇG[i,j] = 2 * GᶠG[i,j] * (V₀^2 + Γ₀^2 * (GᵞL[i,j] + GᵞG[j,i])) * GᶜL[j,i]
+end
+
+function calculate_Σ_freq!(model::PhotonAssitedModel,data::ProblemData,i)
+  @unpack V₀ = model
+  @unpack Gᶜ˥m,Gᶜ˥p,Gᶠ˥m,Gᶠ˥p,Gᵇ˥m,Gᵇ˥p,Σᶠ˥p,Σᶠ˥m,Σᵇ˥p,Σᵇ˥m,mesh,fermi = data
+    
+  if size(Σᶠ˥p,1) < i resize!(data, size(data.GᶜL,1)) end
+  
+  Aᶜ˥ = (Gᶜ˥m[i] .- Gᶜ˥p[i])
+  Aᶜ˥p = fermi .* Aᶜ˥
+  Aᶜ˥h = (1 .- fermi) .* Aᶜ˥
+  
+  Σᶠ˥m[i] = 1 * V₀^2 .* NCA.conv(mesh, Aᶜ˥h, Gᵇ˥m[i]) / (2π)
+  Σᶠ˥p[i] = 1 * V₀^2 .* NCA.conv(mesh, Aᶜ˥h, Gᵇ˥p[i]) / (2π)
+  Σᵇ˥m[i] = 2 * V₀^2 .* NCA.xcorr(mesh, Aᶜ˥p, Gᶠ˥m[i]) / (2π)
+  Σᵇ˥p[i] = 2 * V₀^2 .* NCA.xcorr(mesh, Aᶜ˥p, Gᶠ˥p[i]) / (2π)
+end
+
+function Base.resize!(data::ProblemData, n)
+  @unpack ΣᶠL,ΣᶠG,ΣᵇL,ΣᵇG,Σᶠ˥p,Σᶠ˥m,Σᵇ˥p,Σᵇ˥m = data
+  resize!(ΣᶠL,n)
+  resize!(ΣᶠG,n)
+  resize!(ΣᵇL,n)
+  resize!(ΣᵇG,n)
+  resize!(Σᶠ˥p,n)
+  resize!(Σᶠ˥m,n)
+  resize!(Σᵇ˥p,n)
+  resize!(Σᵇ˥m,n)
+end
