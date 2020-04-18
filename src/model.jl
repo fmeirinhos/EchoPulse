@@ -5,6 +5,7 @@ using NCA
   # single impurity Anderson model parameters
   V₀::Float64     # hybridization strength
   ε₀f::Float64    # f-electron ground state energy
+  λ₀::Float64     # gauge chemical potential
   σ::Float64      # c-electron lorenztian bandwidth
 
   # pulse parameters
@@ -53,9 +54,10 @@ struct ProblemData
   mesh::NCA.MeshType
   fermi::Vector
   bose::Vector
+  boltz::Vector
 
   function ProblemData(GᶜL,GᶜG,GᶠL,GᶠG,GᵇL,GᵇG,GᵞL,GᵞG,
-    Gᶜ˥m,Gᶜ˥p,Gᶠ˥m,Gᶠ˥p,Gᵇ˥m,Gᵇ˥p,mesh,fermi,bose)
+    Gᶜ˥m,Gᶜ˥p,Gᶠ˥m,Gᶠ˥p,Gᵇ˥m,Gᵇ˥p,mesh,fermi,bose,boltz)
 
   new(GᶜL,GᶜG,GᶠL,GᶠG,GᵇL,GᵇG,GᵞL,GᵞG,
     [Gᶜ˥m],[Gᶜ˥p],[Gᶠ˥m],[Gᶠ˥p],[Gᵇ˥m],[Gᵇ˥p],
@@ -63,15 +65,15 @@ struct ProblemData
     GreenFunction(zeros(ComplexF64,0,0), Greater),
     GreenFunction(zeros(ComplexF64,0,0), Lesser),
     GreenFunction(zeros(ComplexF64,0,0), Greater),
-    [[]],[[]],[[]],[[]],mesh,fermi,bose)
+    [[]],[[]],[[]],[[]],mesh,fermi,bose,boltz)
   end
 end
 
 function f_vert_time(model::PhotonAssitedModel,data::ProblemData,times,t1,t2)
   @unpack GᶜL,GᶜG,GᶠL,GᶠG,GᵇL,GᵇG,GᵞL,GᵞG,ΣᶠL,ΣᶠG,ΣᵇL,ΣᵇG = data
-  @unpack ε₀f,σ,hᵧ,γ,δ₀ = model
+  @unpack ε₀f,λ₀,σ,hᵧ,γ,δ₀ = model
 
-  # Real-time collision integral
+  # real-time collision integral
   ∫dt(i,j,A,B) = sign(j-i) * trapz(
     times[min(i,j):max(i,j)], [A[t1,t] * B[t,t2] for t=min(i,j):max(i,j)])
 
@@ -82,12 +84,12 @@ function f_vert_time(model::PhotonAssitedModel,data::ProblemData,times,t1,t2)
   dGᶜL = -1.0im * (-1.0im * σ * GᶜL[t1,t2])
   
   # pseudo fermion
-  dGᶠG = -1.0im * (ε₀f * GᶠG[t1,t2] + ∫dt(t2,t1,ΣᶠG,GᶠG))
-  dGᶠL = -1.0im * (ε₀f * GᶠL[t1,t2] + ∫dt(1,t1,ΣᶠG,GᶠL) - ∫dt(1,t2,ΣᶠL,GᶠG))
+  dGᶠG = -1.0im * ((ε₀f-λ₀) * GᶠG[t1,t2] + ∫dt(t2,t1,ΣᶠG,GᶠG))
+  dGᶠL = -1.0im * ((ε₀f-λ₀) * GᶠL[t1,t2] + ∫dt(1,t1,ΣᶠG,GᶠL) - ∫dt(1,t2,ΣᶠL,GᶠG))
    
   # slave boson
-  dGᵇG = -1.0im * (zero(GᵇG[t1,t2]) + ∫dt(t2,t1,ΣᵇG,GᵇG))
-  dGᵇL = -1.0im * (zero(GᵇL[t1,t2]) + ∫dt(1,t1,ΣᵇG,GᵇL) - ∫dt(1,t2,ΣᵇL,GᵇG))
+  dGᵇG = -1.0im * (-λ₀ * GᵇG[t1,t2] + ∫dt(t2,t1,ΣᵇG,GᵇG))
+  dGᵇL = -1.0im * (-λ₀ * GᵇL[t1,t2] + ∫dt(1,t1,ΣᵇG,GᵇL) - ∫dt(1,t2,ΣᵇL,GᵇG))
 
   # thz pulse
   dGᵞL = -1.0im * ((hᵧ(times[t1])
@@ -130,9 +132,9 @@ function f_diag_time(model::PhotonAssitedModel,data::ProblemData,times,t1)
 end
 
 function f_vert_freq(model::PhotonAssitedModel,data::ProblemData,times,t1,t2)
-  @unpack Gᶠ˥m,Gᶠ˥p,Gᵇ˥m,Gᵇ˥p,Σᶠ˥p,Σᶠ˥m,Σᵇ˥p,Σᵇ˥m,mesh,fermi,bose = data
+  @unpack Gᶠ˥m,Gᶠ˥p,Gᵇ˥m,Gᵇ˥p,Σᶠ˥p,Σᶠ˥m,Σᵇ˥p,Σᵇ˥m,mesh,fermi,bose,boltz = data
 
-  # Real-frequency collision integral
+  # real-frequency collision integral
   ∫dω(f) = trapz(mesh, f) / (2π)
 
   # conduction electron
@@ -161,9 +163,9 @@ function f_vert_freq(model::PhotonAssitedModel,data::ProblemData,times,t1,t2)
 end
 
 function f_diag_freq(model::PhotonAssitedModel,data::ProblemData,times,t1)
-  @unpack Gᶠ˥m,Gᶠ˥p,Gᵇ˥m,Gᵇ˥p,Σᶠ˥p,Σᶠ˥m,Σᵇ˥p,Σᵇ˥m,mesh,fermi,bose = data
+  @unpack Gᶠ˥m,Gᶠ˥p,Gᵇ˥m,Gᵇ˥p,Σᶠ˥p,Σᶠ˥m,Σᵇ˥p,Σᵇ˥m,mesh,fermi,bose,boltz = data
 
-  # Real-frequency collision integral
+  # real-frequency collision integral
   ∫dω(f) = trapz(mesh, f) / (2π)
 
   # conduction electron
@@ -192,13 +194,13 @@ function f_diag_freq(model::PhotonAssitedModel,data::ProblemData,times,t1)
 end
 
 function f_line_freq(model::PhotonAssitedModel,data::ProblemData,times,t1)
+  @unpack Gᶜ˥m,Gᶜ˥p,Gᶠ˥m,Gᶠ˥p,Gᵇ˥m,Gᵇ˥p,ΣᶠG,ΣᵇG,Σᶠ˥p,Σᶠ˥m,Σᵇ˥p,Σᵇ˥m = data
+  @unpack ε₀f,λ₀,σ = model
+
   calculate_Σ_time!(model, data, t1, 1)
   calculate_Σ_freq!(model, data, t1)
   
-  @unpack ε₀f,σ = model
-  @unpack Gᶜ˥m,Gᶜ˥p,Gᶠ˥m,Gᶠ˥p,Gᵇ˥m,Gᵇ˥p,ΣᶠG,ΣᵇG,Σᶠ˥p,Σᶠ˥m,Σᵇ˥p,Σᵇ˥m = data
-  
-  # Real-time collision integral
+  # real-time collision integral
   ∫dt(A,B) = trapz(times, [A[t1,t] .* B[t] for t=1:t1])
   
   # conduction electron
@@ -206,12 +208,12 @@ function f_line_freq(model::PhotonAssitedModel,data::ProblemData,times,t1)
   dGᶜ˥p = -1.0im * (-1.0im .* σ .* Gᶜ˥p[t1])
 
   # pseudo fermion
-  dGᶠ˥m = -1.0im * (ε₀f .* Gᶠ˥m[t1] .+ ∫dt(ΣᶠG, Gᶠ˥m) .+ Σᶠ˥m[t1] .* Gᶠ˥m[1])
-  dGᶠ˥p = -1.0im * (ε₀f .* Gᶠ˥p[t1] .+ ∫dt(ΣᶠG, Gᶠ˥p) .+ Σᶠ˥p[t1] .* Gᶠ˥p[1])
+  dGᶠ˥m = -1.0im * ((ε₀f-λ₀).*Gᶠ˥m[t1] .+ ∫dt(ΣᶠG, Gᶠ˥m) .+ Σᶠ˥m[t1].*Gᶠ˥m[1])
+  dGᶠ˥p = -1.0im * ((ε₀f-λ₀).*Gᶠ˥p[t1] .+ ∫dt(ΣᶠG, Gᶠ˥p) .+ Σᶠ˥p[t1].*Gᶠ˥p[1])
 
   # slave boson
-  dGᵇ˥m = -1.0im * (zero(Gᵇ˥m[t1]) .+ ∫dt(ΣᵇG, Gᵇ˥m) .+ Σᵇ˥m[t1] .* Gᵇ˥m[1])
-  dGᵇ˥p = -1.0im * (zero(Gᵇ˥p[t1]) .+ ∫dt(ΣᵇG, Gᵇ˥p) .+ Σᵇ˥p[t1] .* Gᵇ˥p[1])
+  dGᵇ˥m = -1.0im * (-λ₀.*Gᵇ˥m[t1] .+ ∫dt(ΣᵇG, Gᵇ˥m) .+ Σᵇ˥m[t1].*Gᵇ˥m[1])
+  dGᵇ˥p = -1.0im * (-λ₀.*Gᵇ˥p[t1] .+ ∫dt(ΣᵇG, Gᵇ˥p) .+ Σᵇ˥p[t1].*Gᵇ˥p[1])
 
   return [dGᶜ˥m, dGᶜ˥p, dGᶠ˥m, dGᶠ˥p, dGᵇ˥m, dGᵇ˥p]
 end
