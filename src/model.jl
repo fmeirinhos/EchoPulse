@@ -34,22 +34,22 @@ struct ProblemData
   GᵞL::GreenFunction
   GᵞG::GreenFunction
   
-  Gᶜ˥m::Vector{Vector}
-  Gᶜ˥p::Vector{Vector}
-  Gᶠ˥m::Vector{Vector}
-  Gᶠ˥p::Vector{Vector}
-  Gᵇ˥m::Vector{Vector}
-  Gᵇ˥p::Vector{Vector}
+  Gᶜ˥m::GreenFunction
+  Gᶜ˥p::GreenFunction
+  Gᶠ˥m::GreenFunction
+  Gᶠ˥p::GreenFunction
+  Gᵇ˥m::GreenFunction
+  Gᵇ˥p::GreenFunction
   
   ΣᶠL::GreenFunction
   ΣᶠG::GreenFunction
   ΣᵇL::GreenFunction
   ΣᵇG::GreenFunction
   
-  Σᶠ˥p::Vector{Vector}
-  Σᶠ˥m::Vector{Vector}
-  Σᵇ˥p::Vector{Vector}
-  Σᵇ˥m::Vector{Vector}
+  Σᶠ˥p::GreenFunction
+  Σᶠ˥m::GreenFunction
+  Σᵇ˥p::GreenFunction
+  Σᵇ˥m::GreenFunction
   
   mesh::NCA.MeshType
   fermi::Vector
@@ -60,12 +60,16 @@ struct ProblemData
     Gᶜ˥m,Gᶜ˥p,Gᶠ˥m,Gᶠ˥p,Gᵇ˥m,Gᵇ˥p,mesh,fermi,bose,boltz)
 
   new(GᶜL,GᶜG,GᶠL,GᶠG,GᵇL,GᵇG,GᵞL,GᵞG,
-    [Gᶜ˥m],[Gᶜ˥p],[Gᶠ˥m],[Gᶠ˥p],[Gᵇ˥m],[Gᵇ˥p],
-    GreenFunction(zeros(ComplexF64,0,0), Lesser),
-    GreenFunction(zeros(ComplexF64,0,0), Greater),
-    GreenFunction(zeros(ComplexF64,0,0), Lesser),
-    GreenFunction(zeros(ComplexF64,0,0), Greater),
-    [[]],[[]],[[]],[[]],mesh,fermi,bose,boltz)
+    Gᶜ˥m,Gᶜ˥p,Gᶠ˥m,Gᶠ˥p,Gᵇ˥m,Gᵇ˥p,
+    typeof(GᶠL)(zero(GᶠL.data)),
+    typeof(GᶠG)(zero(GᶠG.data)),
+    typeof(GᵇL)(zero(GᵇL.data)),
+    typeof(GᵇG)(zero(GᵇG.data)),
+    typeof(Gᶠ˥m)(zero(Gᶠ˥m.data)),
+    typeof(Gᶠ˥p)(zero(Gᶠ˥p.data)),
+    typeof(Gᵇ˥p)(zero(Gᵇ˥p.data)),
+    typeof(Gᵇ˥p)(zero(Gᵇ˥p.data)),
+    mesh,fermi,bose,boltz)
   end
 end
 
@@ -142,16 +146,18 @@ function f_vert_freq(model::PhotonAssitedModel,data::ProblemData,times,t1,t2)
   dGᶜL = 0.0
   
   # pseudo fermion
-  dGᶠG = 0.0
-  dGᶠL = -1.0im * (
+  val = -1.0im * (
     ∫dω(fermi .* (Σᶠ˥m[t1] .* Gᶠ˥m[t2] - Σᶠ˥p[t1] .* Gᶠ˥p[t2])))
+  dGᶠG = val
+  dGᶠL = val
   # dGᶠL = -1.0im * (
   #   -∫dω((1.-fermi) .* (Σᶠ˥m[t1] .* ⌐(Gᶠ˥p[t2]) - Σᶠ˥p[t1] .* ⌐(Gᶠ˥m[t2]))))
   
   # slave boson
-  dGᵇG = 0.0
-  dGᵇL = -1.0im * (
+  val = -1.0im * (
     -∫dω(bose .* (Σᵇ˥m[t1] .* Gᵇ˥m[t2] - Σᵇ˥p[t1] .* Gᵇ˥p[t2])))
+  dGᵇG = val
+  dGᵇL = val
   # dGᵇL = -1.0im * (
   #   -∫dω((1.+bose) .* (Σᵇ˥m[t1] .* ⌐(Gᵇ˥p[t2]) - Σᵇ˥p[t1] .* ⌐(Gᵇ˥m[t2]))))
   
