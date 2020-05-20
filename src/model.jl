@@ -86,16 +86,16 @@ function f_vert_time(model::PhotonAssitedModel,data::ProblemData,times,t1,t2)
   calculate_Σ_time!(model, data, t1, t2)
   
   # conduction electron
-  dGᶜG = -1.0im * (-1.0im * σ * GᶜG[t1,t2])
   dGᶜL = -1.0im * (-1.0im * σ * GᶜL[t1,t2])
+  dGᶜG = -1.0im * (-1.0im * σ * GᶜG[t1,t2])
   
   # pseudo fermion
-  dGᶠG = -1.0im * ((ε₀f-λ₀) * GᶠG[t1,t2] + ∫dt(t2,t1,ΣᶠG,GᶠG))
   dGᶠL = -1.0im * ((ε₀f-λ₀) * GᶠL[t1,t2] + ∫dt(1,t1,ΣᶠG,GᶠL) - ∫dt(1,t2,ΣᶠL,GᶠG))
+  dGᶠG = -1.0im * ((ε₀f-λ₀) * GᶠG[t1,t2] + ∫dt(t2,t1,ΣᶠG,GᶠG))
   
   # slave boson
-  dGᵇG = -1.0im * (-λ₀ * GᵇG[t1,t2] + ∫dt(t2,t1,ΣᵇG,GᵇG))
   dGᵇL = -1.0im * (-λ₀ * GᵇL[t1,t2] + ∫dt(1,t1,ΣᵇG,GᵇL) - ∫dt(1,t2,ΣᵇL,GᵇG))
+  dGᵇG = -1.0im * (-λ₀ * GᵇG[t1,t2] + ∫dt(t2,t1,ΣᵇG,GᵇG))
   
   # thz pulse
   dGᵞL = -1.0im * ((hᵧ(times[t1])
@@ -107,8 +107,11 @@ function f_vert_time(model::PhotonAssitedModel,data::ProblemData,times,t1,t2)
 end
 
 function f_diag_time(model::PhotonAssitedModel,data::ProblemData,times,t1)
-  @unpack GᵞL,GᵞG = data
+  @unpack GᶜL,GᶜG,GᶠL,GᶠG,GᵇL,GᵇG,GᵞL,GᵞG,ΣᶠL,ΣᶠG,ΣᵇL,ΣᵇG = data
   @unpack hᵧ,γ,λ,δ₀ = model
+
+  # real-time collision integral
+  ∫dt(A,B) = trapz(times, [A[t1,t] * B[t,t1] for t=1:t1])
 
   # commutator
   ⋊(a,b) = a * b - b * adjoint(a)
@@ -116,16 +119,16 @@ function f_diag_time(model::PhotonAssitedModel,data::ProblemData,times,t1)
   calculate_Σ_time!(model, data, t1, t1)
 
   # conduction electron
-  dGᶜG = 0.0
   dGᶜL = 0.0
+  dGᶜG = 0.0
 
   # pseudo fermion
+  dGᶠL = -1.0im * (∫dt(ΣᶠG,GᶠL) - ∫dt(ΣᶠL,GᶠG) + ∫dt(GᶠL,ΣᶠG) - ∫dt(GᶠG,ΣᶠL))
   dGᶠG = 0.0
-  dGᶠL = 0.0
   
   # slave boson
+  dGᵇL = -1.0im * (∫dt(ΣᵇG,GᵇL) - ∫dt(ΣᵇL,GᵇG) + ∫dt(GᵇL,ΣᵇG) - ∫dt(GᵇG,ΣᵇL))
   dGᵇG = 0.0
-  dGᵇL = 0.0
   
   # thz pulse
   dGᵞL = -1.0im * (hᵧ(times[t1]) ⋊ GᵞL[t1,t1] 
@@ -144,18 +147,18 @@ function f_vert_freq(model::PhotonAssitedModel,data::ProblemData,times,t1,t2)
   ∫dω(f) = trapz(freqs, f) / (2π)
 
   # conduction electron
-  dGᶜG = 0.0
   dGᶜL = 0.0
+  dGᶜG = 0.0
   
   # pseudo fermion
-  dGᶠG = 0.0
   dGᶠL = -1.0im * (
     +∫dω(fermi .* (Σᶠ˥m[t1] .* conj(Gᶠ˥p[t2]) - Σᶠ˥p[t1] .* conj(Gᶠ˥m[t2]))))
+  dGᶠG = 0.0
   
   # slave boson
-  dGᵇG = 0.0
   dGᵇL = -1.0im * (
     -∫dω(bose .* (Σᵇ˥m[t1] .* conj(Gᵇ˥p[t2]) - Σᵇ˥p[t1] .* conj(Gᵇ˥m[t2]))))
+  dGᵇG = 0.0
   
   # thz pulse
   dGᵞL = 0.0
@@ -171,22 +174,22 @@ function f_diag_freq(model::PhotonAssitedModel,data::ProblemData,times,t1)
   ∫dω(f) = trapz(freqs, f) / (2π)
 
   # conduction electron: thermal contributions ∝ ζ → 0
-  dGᶜG = 0.0
   dGᶜL = 0.0
+  dGᶜG = 0.0
 
   # pseudo fermion
-  dGᶠG = 0.0
   dGᶠL = -1.0im * (
     +∫dω(fermi .* (Σᶠ˥m[t1] .* conj(Gᶠ˥p[t1]) .- Σᶠ˥p[t1] .* conj(Gᶠ˥m[t1])))
     -∫dω(fermi .* (Gᶠ˥m[t1] .* conj(Σᶠ˥p[t1]) .- Gᶠ˥p[t1] .* conj(Σᶠ˥p[t1])))
     )
+  dGᶠG = 0.0
   
   # slave boson
-  dGᵇG = 0.0
   dGᵇL = -1.0im * (
     -∫dω(bose .* (Σᵇ˥m[t1] .* conj(Gᵇ˥p[t1]) .- Σᵇ˥p[t1] .* conj(Gᵇ˥m[t1])))
     +∫dω(bose .* (Gᵇ˥m[t1] .* conj(Σᵇ˥p[t1]) .- Gᵇ˥p[t1] .* conj(Σᵇ˥m[t1])))
     )
+  dGᵇG = 0.0
   
   # thz pulse: no thermal contributions
   dGᵞL = 0.0
