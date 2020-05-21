@@ -1,6 +1,7 @@
 using Parameters
 using NCA
 using KadanoffBaym
+using NumericalIntegration
 using ElasticArrays
 
 @with_kw mutable struct PhotonAssitedModel
@@ -80,8 +81,8 @@ function f_vert_time(model::PhotonAssitedModel,data::ProblemData,times,t1,t2)
   @unpack ε₀f,λ₀,σ,hᵧ,γ,δ₀ = model
   
   # real-time collision integral
-  ∫dt(i,j,A,B) = sign(j-i) * trapz(
-    times[min(i,j):max(i,j)], [A[t1,t] * B[t,t2] for t=min(i,j):max(i,j)])
+  ∫dt(i,j,A,B) = sign(j-i) * integrate(times[min(i,j):max(i,j)], 
+    [A[t1,t] * B[t,t2] for t=min(i,j):max(i,j)], TrapezoidalFast())
   
   calculate_Σ_time!(model, data, t1, t2)
   
@@ -111,7 +112,7 @@ function f_diag_time(model::PhotonAssitedModel,data::ProblemData,times,t1)
   @unpack hᵧ,γ,λ,δ₀ = model
 
   # real-time collision integral
-  ∫dt(A,B) = trapz(times, [A[t1,t] * B[t,t1] for t=1:t1])
+  ∫dt(A,B) = integrate(times, [A[t1,t] * B[t,t1] for t=1:t1], TrapezoidalFast())
 
   # commutator
   ⋊(a,b) = a * b - b * adjoint(a)
@@ -144,7 +145,7 @@ function f_vert_freq(model::PhotonAssitedModel,data::ProblemData,times,t1,t2)
   @unpack Gᶠ˥m,Gᶠ˥p,Gᵇ˥m,Gᵇ˥p,Σᶠ˥p,Σᶠ˥m,Σᵇ˥p,Σᵇ˥m,freqs,fermi,bose,boltz = data
 
   # real-frequency collision integral
-  ∫dω(f) = trapz(freqs, f) / (2π)
+  ∫dω(f) = integrate(freqs.mesh, f, TrapezoidalEvenFast()) / (2π)
 
   # conduction electron
   dGᶜL = 0.0
@@ -171,7 +172,7 @@ function f_diag_freq(model::PhotonAssitedModel,data::ProblemData,times,t1)
   @unpack Gᶠ˥m,Gᶠ˥p,Gᵇ˥m,Gᵇ˥p,Σᶠ˥p,Σᶠ˥m,Σᵇ˥p,Σᵇ˥m,freqs,fermi,bose,boltz = data
 
   # real-frequency collision integral
-  ∫dω(f) = trapz(freqs, f) / (2π)
+  ∫dω(f) = integrate(freqs.mesh, f, TrapezoidalEvenFast()) / (2π)
 
   # conduction electron: thermal contributions ∝ ζ → 0
   dGᶜL = 0.0
@@ -206,7 +207,7 @@ function f_line_freq(model::PhotonAssitedModel,data::ProblemData,times,t1)
   calculate_Σ_freq!(model, data, t1)
   
   # real-time collision integral
-  ∫dt(A,B) = trapz(times, [A[t1,t] .* B[t] for t=1:t1])
+  ∫dt(A,B) = integrate(times, [A[t1,t] .* B[t] for t=1:t1], TrapezoidalFast())
   
   # conduction electron
   dGᶜ˥m = -1.0im * (-1.0im .* σ .* Gᶜ˥m[t1])
@@ -260,4 +261,8 @@ function calculate_Σ_freq!(model::PhotonAssitedModel,data::ProblemData,i)
   Σᶠ˥p[i] = 1 * V₀^2 .* NCA.conv(freqs, Aᶜh, Gᵇ˥p[i]) / (2π)
   Σᵇ˥m[i] = 2 * V₀^2 .* NCA.xcorr(freqs, Aᶜp, Gᶠ˥m[i]) / (2π)
   Σᵇ˥p[i] = 2 * V₀^2 .* NCA.xcorr(freqs, Aᶜp, Gᶠ˥p[i]) / (2π)
+end
+
+function NumericalIntegration._zero(x, y::Vector{<:AbstractVector})
+  ret = zero(first(y)) # NOTE: not type-stable
 end
