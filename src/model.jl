@@ -28,36 +28,36 @@ using ElasticArrays
 end
 
 struct ProblemData
-  GᶜL::GreenFunction
-  GᶜG::GreenFunction
-  GᶠL::GreenFunction
-  GᶠG::GreenFunction
-  GᵇL::GreenFunction
-  GᵇG::GreenFunction
-  GᵞL::GreenFunction
-  GᵞG::GreenFunction
+  GᶜL::GreenFunction{ComplexF64, Matrix{ComplexF64}, Lesser}
+  GᶜG::GreenFunction{ComplexF64, Matrix{ComplexF64}, Greater}
+  GᶠL::GreenFunction{ComplexF64, Matrix{ComplexF64}, Lesser}
+  GᶠG::GreenFunction{ComplexF64, Matrix{ComplexF64}, Greater}
+  GᵇL::GreenFunction{ComplexF64, Matrix{ComplexF64}, Lesser}
+  GᵇG::GreenFunction{ComplexF64, Matrix{ComplexF64}, Greater}
+  GᵞL::GreenFunction{ComplexF64, Matrix{ComplexF64}, Lesser}
+  GᵞG::GreenFunction{ComplexF64, Matrix{ComplexF64}, Greater}
   
-  Gᶜ˥m::GreenFunction
-  Gᶜ˥p::GreenFunction
-  Gᶠ˥m::GreenFunction
-  Gᶠ˥p::GreenFunction
-  Gᵇ˥m::GreenFunction
-  Gᵇ˥p::GreenFunction
+  Gᶜ˥m::GreenFunction{ComplexF64, ElasticArray{ComplexF64,2,1,Vector{ComplexF64}}, MixedLesser}
+  Gᶜ˥p::GreenFunction{ComplexF64, ElasticArray{ComplexF64,2,1,Vector{ComplexF64}}, MixedLesser}
+  Gᶠ˥m::GreenFunction{ComplexF64, ElasticArray{ComplexF64,2,1,Vector{ComplexF64}}, MixedLesser}
+  Gᶠ˥p::GreenFunction{ComplexF64, ElasticArray{ComplexF64,2,1,Vector{ComplexF64}}, MixedLesser}
+  Gᵇ˥m::GreenFunction{ComplexF64, ElasticArray{ComplexF64,2,1,Vector{ComplexF64}}, MixedLesser}
+  Gᵇ˥p::GreenFunction{ComplexF64, ElasticArray{ComplexF64,2,1,Vector{ComplexF64}}, MixedLesser}
   
-  ΣᶠL::GreenFunction
-  ΣᶠG::GreenFunction
-  ΣᵇL::GreenFunction
-  ΣᵇG::GreenFunction
+  ΣᶠL::GreenFunction{ComplexF64, Matrix{ComplexF64}, Lesser}
+  ΣᶠG::GreenFunction{ComplexF64, Matrix{ComplexF64}, Greater}
+  ΣᵇL::GreenFunction{ComplexF64, Matrix{ComplexF64}, Lesser}
+  ΣᵇG::GreenFunction{ComplexF64, Matrix{ComplexF64}, Greater}
   
-  Σᶠ˥p::GreenFunction
-  Σᶠ˥m::GreenFunction
-  Σᵇ˥p::GreenFunction
-  Σᵇ˥m::GreenFunction
+  Σᶠ˥p::GreenFunction{ComplexF64, ElasticArray{ComplexF64,2,1,Vector{ComplexF64}}, MixedLesser}
+  Σᶠ˥m::GreenFunction{ComplexF64, ElasticArray{ComplexF64,2,1,Vector{ComplexF64}}, MixedLesser}
+  Σᵇ˥p::GreenFunction{ComplexF64, ElasticArray{ComplexF64,2,1,Vector{ComplexF64}}, MixedLesser}
+  Σᵇ˥m::GreenFunction{ComplexF64, ElasticArray{ComplexF64,2,1,Vector{ComplexF64}}, MixedLesser}
   
   freqs::NCA.AbstractMesh
-  fermi::Vector
-  bose::Vector
-  boltz::Vector
+  fermi::Vector{Float64}
+  bose::Vector{Float64}
+  boltz::Vector{Float64}
 
   function ProblemData(GᶜL,GᶜG,GᶠL,GᶠG,GᵇL,GᵇG,GᵞL,GᵞG,
     Gᶜ˥m,Gᶜ˥p,Gᶠ˥m,Gᶠ˥p,Gᵇ˥m,Gᵇ˥p,freqs,fermi,bose,boltz)
@@ -83,9 +83,7 @@ function f_vert_time(model::PhotonAssitedModel,data::ProblemData,times,t1,t2)
   # real-time collision integral
   ∫dt(i,j,A,B) = sign(j-i) * integrate(times[min(i,j):max(i,j)], 
     [A[t1,t] * B[t,t2] for t=min(i,j):max(i,j)], TrapezoidalFast())
-  
-  calculate_Σ_time!(model, data, t1, t2)
-  
+
   # conduction electron
   dGᶜL = -1.0im * (-1.0im * σ * GᶜL[t1,t2])
   dGᶜG = -1.0im * (-1.0im * σ * GᶜG[t1,t2])
@@ -100,9 +98,9 @@ function f_vert_time(model::PhotonAssitedModel,data::ProblemData,times,t1,t2)
   
   # thz pulse
   dGᵞL = -1.0im * ((hᵧ(times[t1])
-   + 1.0im * γ(times[t1]) - 1.0im * δ₀) * GᵞL[t1,t2])
+   + 1.0im * γ(times[t1]) - 1.0im * δ₀) * GᵞL[t1,t2])::ComplexF64
   dGᵞG = -1.0im * ((hᵧ(times[t1])
-   + 1.0im * γ(times[t1]) - 1.0im * δ₀) * GᵞG[t1,t2])
+   + 1.0im * γ(times[t1]) - 1.0im * δ₀) * GᵞG[t1,t2])::ComplexF64
   
   return [dGᶜL, dGᶜG, dGᶠL, dGᶠG, dGᵇL, dGᵇG, dGᵞL, dGᵞG]
 end
@@ -116,8 +114,6 @@ function f_diag_time(model::PhotonAssitedModel,data::ProblemData,times,t1)
 
   # commutator
   ⋊(a,b) = a * b - b * adjoint(a)
-
-  calculate_Σ_time!(model, data, t1, t1)
 
   # conduction electron
   dGᶜL = 0.0
@@ -133,10 +129,10 @@ function f_diag_time(model::PhotonAssitedModel,data::ProblemData,times,t1)
   
   # thz pulse
   dGᵞL = -1.0im * (hᵧ(times[t1]) ⋊ GᵞL[t1,t1] 
-    + 1.0im * γ(times[t1]) * (GᵞL[t1,t1] + GᵞG[t1,t1]))
+    + 1.0im * γ(times[t1]) * (GᵞL[t1,t1] + GᵞG[t1,t1]))::ComplexF64
   dGᵞG = -1.0im * (hᵧ(times[t1]) ⋊ GᵞG[t1,t1] 
     + 1.0im * λ(times[t1]) * (GᵞG[t1,t1] - GᵞL[t1,t1]) 
-    + 2.0im * γ(times[t1]) * GᵞG[t1,t1])
+    + 2.0im * γ(times[t1]) * GᵞG[t1,t1])::ComplexF64
   
   return [dGᶜL, dGᶜG, dGᶠL, dGᶠG, dGᵇL, dGᵇG, dGᵞL, dGᵞG]
 end
@@ -145,8 +141,7 @@ function calculate_Σ_time!(model::PhotonAssitedModel,data::ProblemData,i,j)
   @unpack V₀,Γ₀ = model
   @unpack GᶜL,GᶜG,GᶠL,GᶠG,GᵇL,GᵇG,GᵞL,GᵞG,ΣᶠL,ΣᶠG,ΣᵇL,ΣᵇG = data
   
-  if size(ΣᶠL,1) < max(i,j)
-    n = size(GᶜL,1)
+  if (n = size(GᶜL,1)) > size(ΣᶠL,1)
     resize!(ΣᶠL,n)
     resize!(ΣᶠG,n)
     resize!(ΣᵇL,n)
@@ -220,9 +215,6 @@ end
 function f_line_freq(model::PhotonAssitedModel,data::ProblemData,times,t1)
   @unpack Gᶜ˥m,Gᶜ˥p,Gᶠ˥m,Gᶠ˥p,Gᵇ˥m,Gᵇ˥p,ΣᶠG,ΣᵇG,Σᶠ˥p,Σᶠ˥m,Σᵇ˥p,Σᵇ˥m = data
   @unpack ε₀f,λ₀,σ = model
-
-  calculate_Σ_time!(model, data, t1, 1)
-  calculate_Σ_freq!(model, data, t1)
   
   # real-time collision integral
   ∫dt(A,B) = integrate(times, [A[t1,t] .* B[t] for t=1:t1], TrapezoidalFast())
@@ -246,8 +238,7 @@ function calculate_Σ_freq!(model::PhotonAssitedModel,data::ProblemData,i)
   @unpack V₀ = model
   @unpack Gᶜ˥m,Gᶜ˥p,Gᶠ˥m,Gᶠ˥p,Gᵇ˥m,Gᵇ˥p,Σᶠ˥p,Σᶠ˥m,Σᵇ˥p,Σᵇ˥m,freqs,fermi = data
     
-  if size(Σᶠ˥p,2) < i
-    n = size(Gᶜ˥m,2)
+  if (n = size(Gᶜ˥m,2)) > size(Σᶠ˥p,2)
     resize!(Σᶠ˥p,n)
     resize!(Σᶠ˥m,n)
     resize!(Σᵇ˥p,n)
