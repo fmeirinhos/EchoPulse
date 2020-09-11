@@ -39,20 +39,20 @@ struct ProblemData
   GᵞG::GreenFunction{ComplexF64, Matrix{ComplexF64}, Greater}
   
   Aᶜ˹::GreenFunction{ComplexF64, ElasticArray{ComplexF64,2,1,Vector{ComplexF64}}, MixedGreater}
-  Aᶠ˹::GreenFunction{ComplexF64, ElasticArray{ComplexF64,2,1,Vector{ComplexF64}}, MixedGreater}
-  Gᶠ˹p::GreenFunction{ComplexF64, ElasticArray{ComplexF64,2,1,Vector{ComplexF64}}, MixedGreater}
-  Aᵇ˹::GreenFunction{ComplexF64, ElasticArray{ComplexF64,2,1,Vector{ComplexF64}}, MixedGreater}
-  Gᵇ˹p::GreenFunction{ComplexF64, ElasticArray{ComplexF64,2,1,Vector{ComplexF64}}, MixedGreater}
+  GᶠT::GreenFunction{ComplexF64, ElasticArray{ComplexF64,2,1,Vector{ComplexF64}}, MixedGreater}
+  GᶠM::GreenFunction{ComplexF64, ElasticArray{ComplexF64,2,1,Vector{ComplexF64}}, MixedGreater}
+  GᵇT::GreenFunction{ComplexF64, ElasticArray{ComplexF64,2,1,Vector{ComplexF64}}, MixedGreater}
+  GᵇM::GreenFunction{ComplexF64, ElasticArray{ComplexF64,2,1,Vector{ComplexF64}}, MixedGreater}
   
   ΣᶠL::GreenFunction{ComplexF64, Matrix{ComplexF64}, Lesser}
   ΣᶠG::GreenFunction{ComplexF64, Matrix{ComplexF64}, Greater}
   ΣᵇL::GreenFunction{ComplexF64, Matrix{ComplexF64}, Lesser}
   ΣᵇG::GreenFunction{ComplexF64, Matrix{ComplexF64}, Greater}
   
-  Σᶠ˹A::GreenFunction{ComplexF64, ElasticArray{ComplexF64,2,1,Vector{ComplexF64}}, MixedGreater}
-  Σᶠ˹p::GreenFunction{ComplexF64, ElasticArray{ComplexF64,2,1,Vector{ComplexF64}}, MixedGreater}
-  Σᵇ˹A::GreenFunction{ComplexF64, ElasticArray{ComplexF64,2,1,Vector{ComplexF64}}, MixedGreater}
-  Σᵇ˹p::GreenFunction{ComplexF64, ElasticArray{ComplexF64,2,1,Vector{ComplexF64}}, MixedGreater}
+  ΣᶠT::GreenFunction{ComplexF64, ElasticArray{ComplexF64,2,1,Vector{ComplexF64}}, MixedGreater}
+  ΣᶠM::GreenFunction{ComplexF64, ElasticArray{ComplexF64,2,1,Vector{ComplexF64}}, MixedGreater}
+  ΣᵇT::GreenFunction{ComplexF64, ElasticArray{ComplexF64,2,1,Vector{ComplexF64}}, MixedGreater}
+  ΣᵇM::GreenFunction{ComplexF64, ElasticArray{ComplexF64,2,1,Vector{ComplexF64}}, MixedGreater}
   
   freqs::NCA.AbstractMesh
   fermi::Vector{Float64}
@@ -84,10 +84,6 @@ function ProblemData(model::PhotonAssitedModel, β::Real, mesh, nᵞ::Real)
   imGᶠ = view(reinterpret(Float64, GᶠA), 2:2:length(GᶠA))
   imGᶠ[imGᶠ .< nca.eps] .= 0.0
 
-  Aᶜ = 1im * nca.data.Nc
-  Aᵇ_t = 2im * nca.data.imG_t[:,1]
-  Aᶠ_t = 2im * nca.data.imG_t[:,2]
-
   # Create a new frequency grid that supports for complex convolutions
   freqs = NCA.LinearMesh(nca.mesh.xmin, nca.mesh.xmax, nca.mesh.L, true);
 
@@ -96,19 +92,22 @@ function ProblemData(model::PhotonAssitedModel, β::Real, mesh, nᵞ::Real)
 
   @unpack fermi,fermi⁻,th½ = nca.data
 
+  Aᶜ = 1im * nca.data.Nc
   GᶜL = GreenFunction(∫dω(fermi .* Aᶜ) * ones(1,1), Lesser)
   GᶜG = GreenFunction(-∫dω(fermi⁻ .* Aᶜ) * ones(1,1), Greater)
   Aᶜ˹ = GreenFunction(ElasticArray(hcat(Aᶜ)), MixedGreater)
 
+  Aᶠ_t = 2im * nca.data.imG_t[:,2]
   GᶠL = GreenFunction(∫dω(fermi .* Aᶠ_t) * ones(1,1), Lesser)
   GᶠG = GreenFunction(-(1.0im) * ones(1,1), Greater)
-  Aᶠ˹ = GreenFunction(ElasticArray(hcat(Aᶠ_t)), MixedGreater)
-  Gᶠ˹p = GreenFunction(ElasticArray(hcat(conj(GᶠA))), MixedGreater)
+  GᶠT = GreenFunction(ElasticArray(hcat(Aᶠ_t)), MixedGreater)
+  GᶠM = GreenFunction(ElasticArray(hcat(GᶠA)), MixedGreater)
 
+  Aᵇ_t = 2im * nca.data.imG_t[:,1]
   GᵇL = GreenFunction(-∫dω(fermi .* Aᵇ_t) * ones(1,1), Lesser)  
   GᵇG = GreenFunction(-(1.0im) * ones(1,1), Greater)
-  Aᵇ˹ = GreenFunction(ElasticArray(hcat(Aᵇ_t)), MixedGreater)
-  Gᵇ˹p = GreenFunction(ElasticArray(hcat(conj(GᵇA))), MixedGreater)
+  GᵇT = GreenFunction(ElasticArray(hcat(Aᵇ_t)), MixedGreater)
+  GᵇM = GreenFunction(ElasticArray(hcat(GᵇA)), MixedGreater)
 
   GᵞL = GreenFunction(-1.0im * nᵞ * ones(1,1), Lesser)  
   GᵞG = GreenFunction(-1.0im * (1 + nᵞ) * ones(1,1), Greater)
@@ -121,26 +120,28 @@ function ProblemData(model::PhotonAssitedModel, β::Real, mesh, nᵞ::Real)
   println(" Q = $(imag(2GᶠL[1,1] - GᵇL[1,1]))")
 
   data = ProblemData(GᶜL,GᶜG,GᶠL,GᶠG,GᵇL,GᵇG,GᵞL,GᵞG,
-    Aᶜ˹,Aᶠ˹,Gᶠ˹p,Aᵇ˹,Gᵇ˹p,
+    Aᶜ˹,GᶠT,GᶠM,GᵇT,GᵇM,
     typeof(GᶠL)(zero(GᶠL.data)),
     typeof(GᶠG)(zero(GᶠG.data)),
     typeof(GᵇL)(zero(GᵇL.data)),
     typeof(GᵇG)(zero(GᵇG.data)),
-    typeof(Aᶠ˹)(ElasticArray(zero(Aᶠ˹.data))),
-    typeof(Gᶠ˹p)(ElasticArray(zero(Gᶠ˹p.data))),
-    typeof(Aᵇ˹)(ElasticArray(zero(Aᵇ˹.data))),
-    typeof(Gᵇ˹p)(ElasticArray(zero(Gᵇ˹p.data))),
+    typeof(GᶠT)(ElasticArray(zero(GᶠT.data))),
+    typeof(GᶠM)(ElasticArray(zero(GᶠM.data))),
+    typeof(GᵇT)(ElasticArray(zero(GᵇT.data))),
+    typeof(GᵇM)(ElasticArray(zero(GᵇM.data))),
     freqs,fermi,fermi⁻,th½)
 
   # NOTE: initialize self-energies
   calculate_Σ_time!(model, data, 1, 1)
   calculate_Σ_freq!(model, data, 1)
 
-  @testset "KMS boundary conditions" begin
-    @test 2 * imΣ_t[:,1] ≈ imag(data.Σᵇ˹A[1])
-    @test imΣ_t[:,1] .* fermi⁻ ≈ -imag(data.Σᵇ˹p[1])
-    @test 2 * imΣ_t[:,2] ≈ imag(data.Σᶠ˹A[1])
-    @test imΣ_t[:,2] .* fermi⁻ ≈ -imag(data.Σᶠ˹p[1])
+  @testset "Σ equivalence between mixed and equilibrium formulations" begin
+    @test data.ΣᵇT[1] ≈ +2im * imΣ_t[:,1]
+    @test data.ΣᵇM[1] |> imag ≈ imΣ_t[:,1] .* fermi⁻
+    @test data.ΣᵇM[1] |> real ≈ NCA.kramerskronig(nca.mesh, imΣ_t[:,1] .* fermi⁻, :real) rtol=5e-2
+    @test data.ΣᶠT[1] ≈ +2im * imΣ_t[:,2]
+    @test data.ΣᶠM[1] |> imag ≈ imΣ_t[:,2] .* fermi⁻
+    @test data.ΣᶠM[1] |> real ≈ NCA.kramerskronig(nca.mesh, imΣ_t[:,2] .* fermi⁻, :real) rtol=5e-2
   end
 
   return data
@@ -208,7 +209,7 @@ function f_diag_time(model::PhotonAssitedModel,data::ProblemData,times,t1)
 end
 
 function f_vert_freq(model::PhotonAssitedModel,data::ProblemData,times,t1,t2)
-  @unpack Aᶠ˹,Gᶠ˹p,Aᵇ˹,Gᵇ˹p,Σᶠ˹A,Σᶠ˹p,Σᵇ˹A,Σᵇ˹p,freqs,fermi = data
+  @unpack GᶠT,GᶠM,GᵇT,GᵇM,ΣᶠT,ΣᶠM,ΣᵇT,ΣᵇM,freqs,fermi = data
 
   # real-frequency collision integral
   ∫dω(f) = integrate(freqs.mesh, fermi .* f, TrapezoidalEvenFast()) / (2π)
@@ -219,12 +220,12 @@ function f_vert_freq(model::PhotonAssitedModel,data::ProblemData,times,t1,t2)
   
   # pseudo fermion
   dGᶠL = -1.0im * (
-    +∫dω(conj(Σᶠ˹p[t1]) .* Aᶠ˹[t2] - conj(Σᶠ˹A[t1]) .* Gᶠ˹p[t2]))
+    +∫dω(conj(ΣᶠM[t1]) .* GᶠT[t2] - conj(ΣᶠT[t1]) .* GᶠM[t2]))
   dGᶠG = 0.0
   
   # slave boson
   dGᵇL = -1.0im * (
-    -∫dω(conj(Σᵇ˹p[t1]) .* Aᵇ˹[t2] - conj(Σᵇ˹A[t1]) .* Gᵇ˹p[t2]))
+    -∫dω(conj(ΣᵇM[t1]) .* GᵇT[t2] - conj(ΣᵇT[t1]) .* GᵇM[t2]))
   dGᵇG = 0.0
   
   # thz pulse
@@ -234,7 +235,7 @@ function f_vert_freq(model::PhotonAssitedModel,data::ProblemData,times,t1,t2)
 end
 
 function f_diag_freq(model::PhotonAssitedModel,data::ProblemData,times,t1)
-  @unpack Aᶠ˹,Gᶠ˹p,Aᵇ˹,Gᵇ˹p,Σᶠ˹A,Σᶠ˹p,Σᵇ˹A,Σᵇ˹p,freqs,fermi = data
+  @unpack GᶠT,GᶠM,GᵇT,GᵇM,ΣᶠT,ΣᶠM,ΣᵇT,ΣᵇM,freqs,fermi = data
 
   # real-frequency collision integral
   ∫dω(f) = integrate(freqs.mesh, fermi .* f, TrapezoidalEvenFast()) / (2π)
@@ -245,15 +246,15 @@ function f_diag_freq(model::PhotonAssitedModel,data::ProblemData,times,t1)
 
   # pseudo fermion
   dGᶠL = -1.0im * (
-    +∫dω(conj(Σᶠ˹p[t1]) .* Aᶠ˹[t1] - conj(Σᶠ˹A[t1]) .* Gᶠ˹p[t1])
-    -∫dω(conj(Gᶠ˹p[t1]) .* Σᶠ˹A[t1] - conj(Aᶠ˹[t1]) .* Σᶠ˹p[t1]))
+    +∫dω(conj(ΣᶠM[t1]) .* GᶠT[t1] - conj(ΣᶠT[t1]) .* GᶠM[t1])
+    -∫dω(conj(GᶠM[t1]) .* ΣᶠT[t1] - conj(GᶠT[t1]) .* ΣᶠM[t1]))
 
   dGᶠG = 0.0
   
   # slave boson
   dGᵇL = -1.0im * (
-    -∫dω(conj(Σᵇ˹p[t1]) .* Aᵇ˹[t1] - conj(Σᵇ˹A[t1]) .* Gᵇ˹p[t1])
-    +∫dω(conj(Gᵇ˹p[t1]) .* Σᵇ˹A[t1] - conj(Aᵇ˹[t1]) .* Σᵇ˹p[t1]))
+    -∫dω(conj(ΣᵇM[t1]) .* GᵇT[t1] - conj(ΣᵇT[t1]) .* GᵇM[t1])
+    +∫dω(conj(GᵇM[t1]) .* ΣᵇT[t1] - conj(GᵇT[t1]) .* ΣᵇM[t1]))
   dGᵇG = 0.0
   
   # thz pulse: no thermal contributions
@@ -264,7 +265,7 @@ function f_diag_freq(model::PhotonAssitedModel,data::ProblemData,times,t1)
 end
 
 function f_line_freq(model::PhotonAssitedModel,data::ProblemData,times,t1)
-  @unpack Aᶜ˹,Aᶠ˹,Gᶠ˹p,Aᵇ˹,Gᵇ˹p,Σᶠ˹A,Σᶠ˹p,Σᵇ˹A,Σᵇ˹p = data
+  @unpack Aᶜ˹,GᶠT,GᶠM,GᵇT,GᵇM,ΣᶠT,ΣᶠM,ΣᵇT,ΣᵇM = data
   @unpack GᶜL,GᶜG,GᶠL,GᶠG,GᵇL,GᵇG,GᵞL,GᵞG,ΣᶠG,ΣᵇG = data
   @unpack ε₀f,λ₀,σ = model
 
@@ -275,14 +276,14 @@ function f_line_freq(model::PhotonAssitedModel,data::ProblemData,times,t1)
   dAᶜ˹ = +1.0im * (+1.0im .* σ .* Aᶜ˹[t1])
 
   # pseudo fermion
-  dAᶠ˹ = +1.0im * ((ε₀f-λ₀).*Aᶠ˹[t1] .- ∫dt(Aᶠ˹, ΣᶠG) .+ Σᶠ˹A[t1].*conj(Gᶠ˹p[1]) .+ Σᶠ˹p[t1].*Aᶠ˹[1])
-  dGᶠ˹p = +1.0im * ((ε₀f-λ₀).*Gᶠ˹p[t1] .- ∫dt(Gᶠ˹p, ΣᶠG) .+ Σᶠ˹p[t1].*Gᶠ˹p[1])
+  dGᶠT = +1.0im * ((ε₀f-λ₀).*GᶠT[t1] .- ∫dt(GᶠT, ΣᶠG) .+ GᶠT[1] .* ΣᶠM[t1] .+ conj(GᶠM[1]) .* ΣᶠT[t1])
+  dGᶠM = +1.0im * ((ε₀f-λ₀).*GᶠM[t1] .- ∫dt(GᶠM, ΣᶠG) .+ GᶠM[1] .* ΣᶠM[t1])
 
   # slave boson
-  dAᵇ˹ = +1.0im * (-λ₀.*Aᵇ˹[t1] .- ∫dt(Aᵇ˹, ΣᵇG) .+ Σᵇ˹A[t1].*conj(Gᵇ˹p[1]) .+ Σᵇ˹p[t1].*Aᵇ˹[1])
-  dGᵇ˹p = +1.0im * (-λ₀.*Gᵇ˹p[t1] .- ∫dt(Gᵇ˹p, ΣᵇG) .+ Σᵇ˹p[t1].*Gᵇ˹p[1])
+  dGᵇT = +1.0im * (-λ₀.*GᵇT[t1] .- ∫dt(GᵇT, ΣᵇG) .+ GᵇT[1] .* ΣᵇM[t1] .+ conj(GᵇM[1]) .* ΣᵇT[t1])
+  dGᵇM = +1.0im * (-λ₀.*GᵇM[t1] .- ∫dt(GᵇM, ΣᵇG) .+ GᵇM[1] .* ΣᵇM[t1])
 
-  return [dAᶜ˹, dAᶠ˹, dGᶠ˹p, dAᵇ˹, dGᵇ˹p]
+  return [dAᶜ˹, dGᶠT, dGᶠM, dGᵇT, dGᵇM]
 end
 
 function calculate_Σ_time!(model::PhotonAssitedModel,data::ProblemData,t1,t2)
@@ -304,23 +305,24 @@ end
 
 function calculate_Σ_freq!(model::PhotonAssitedModel,data::ProblemData,t1)
   @unpack V₀ = model
-  @unpack Aᶜ˹,Aᶠ˹,Gᶠ˹p,Aᵇ˹,Gᵇ˹p,Σᶠ˹A,Σᶠ˹p,Σᵇ˹A,Σᵇ˹p = data
+  @unpack Aᶜ˹,GᶠT,GᶠM,GᵇT,GᵇM,ΣᶠT,ΣᶠM,ΣᵇT,ΣᵇM = data
   @unpack freqs, fermi, fermi⁻, th½ = data
     
-  if (n = size(Aᶜ˹,2)) > size(Σᶠ˹p,2)
-    resize!(Σᶠ˹p,n)
-    resize!(Σᶠ˹A,n)
-    resize!(Σᵇ˹p,n)
-    resize!(Σᵇ˹A,n)
+  if (n = size(Aᶜ˹,2)) > size(ΣᶠT,2)
+    resize!(ΣᶠT,n)
+    resize!(ΣᶠM,n)
+    resize!(ΣᵇT,n)
+    resize!(ΣᵇM,n)
   end
   
-  Σᶠ˹p[t1] = -1.0im * V₀^2 / (2π) .* NCA.conv(freqs, fermi⁻ .* Aᶜ˹[t1], Gᵇ˹p[t1])
-  Σᶠ˹A[t1] = -0.5im * V₀^2 / (2π) .* (
-    NCA.conv(freqs, Aᶜ˹[t1], Aᵇ˹[t1]) + NCA.conv(freqs, th½ .* Aᶜ˹[t1], th½ .* Aᵇ˹[t1]))
-
-  Σᵇ˹p[t1] = +2.0im * V₀^2 / (2π) .* NCA.xcorr(freqs, fermi .* Aᶜ˹[t1], Gᶠ˹p[t1])
-  Σᵇ˹A[t1] = +1.0im * V₀^2 / (2π) .* (
-    NCA.xcorr(freqs, Aᶜ˹[t1], Aᶠ˹[t1]) - NCA.xcorr(freqs, th½ .* Aᶜ˹[t1], th½ .* Aᶠ˹[t1]))
+  ΣᶠT[t1] = -0.5im * V₀^2 / (2π) .* (
+    NCA.conv(freqs, Aᶜ˹[t1], GᵇT[t1]) + NCA.conv(freqs, th½ .* Aᶜ˹[t1], th½ .* GᵇT[t1]))
+  ΣᶠM[t1] = -1.0im * V₀^2 / (2π) .* NCA.conv(freqs, fermi⁻ .* Aᶜ˹[t1], GᵇM[t1])
+  
+  ΣᵇT[t1] = +1.0im * V₀^2 / (2π) .* (
+    NCA.xcorr(freqs, Aᶜ˹[t1], GᶠT[t1]) - NCA.xcorr(freqs, th½ .* Aᶜ˹[t1], th½ .* GᶠT[t1]))
+  ΣᵇM[t1] = +2.0im * V₀^2 / (2π) .* NCA.xcorr(freqs, fermi .* Aᶜ˹[t1], GᶠM[t1])
+  
 end
 
 function NumericalIntegration._zero(x, y::Vector{<:AbstractVector})
