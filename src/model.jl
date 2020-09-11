@@ -67,7 +67,7 @@ function ProblemData(model::PhotonAssitedModel, β::Real, mesh, nᵞ::Real)
       V₀=model.V₀,
       ε₀f=model.ε₀f,
       tilde=true,
-      Nc₀=x->NCA.lorentzian(x, 0.0, model.σ)),
+      Nc₀=x->2pi * NCA.lorentzian(x, 0.0, model.σ)),
     β=β,
     mesh=mesh)
   
@@ -84,9 +84,9 @@ function ProblemData(model::PhotonAssitedModel, β::Real, mesh, nᵞ::Real)
   imGᶠ = view(reinterpret(Float64, GᶠA), 2:2:length(GᶠA))
   imGᶠ[imGᶠ .< nca.eps] .= 0.0
 
-  Aᶜ = 1im * 2π * nca.data.Nc
-  Aᵇ_t = 1im * 2π * nca.data.Ab_t
-  Aᶠ_t = 1im * 2π * nca.data.Af_t
+  Aᶜ = 1im * nca.data.Nc
+  Aᵇ_t = 2im * nca.data.imG_t[:,1]
+  Aᶠ_t = 2im * nca.data.imG_t[:,2]
 
   # Create a new frequency grid that supports for complex convolutions
   freqs = NCA.LinearMesh(nca.mesh.xmin, nca.mesh.xmax, nca.mesh.L, true);
@@ -138,7 +138,9 @@ function ProblemData(model::PhotonAssitedModel, β::Real, mesh, nᵞ::Real)
 
   @testset "KMS boundary conditions" begin
     @test 2 * imΣ_t[:,1] ≈ imag(data.Σᵇ˹A[1])
+    @test imΣ_t[:,1] .* fermi⁻ ≈ -imag(data.Σᵇ˹p[1])
     @test 2 * imΣ_t[:,2] ≈ imag(data.Σᶠ˹A[1])
+    @test imΣ_t[:,2] .* fermi⁻ ≈ -imag(data.Σᶠ˹p[1])
   end
 
   return data
