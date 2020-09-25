@@ -150,21 +150,23 @@ end
 function f_vert_time(model::PhotonAssitedModel,data::ProblemData,times,t1,t2)
   @unpack GᶜL,GᶜG,GᶠL,GᶠG,GᵇL,GᵇG,GᵞL,GᵞG,ΣᶠL,ΣᶠG,ΣᵇL,ΣᵇG = data
   @unpack ε₀f,λ₀,σ,hᵧ,γ,δ₀ = model
-  
-  # real-time collision integral
+
+  # real-time collision integral. NOTE: @assert t1 >= t2
   ∫dt(i,j,A,B) = sign(j-i) * integrate(times[min(i,j):max(i,j)], 
     [A[t1,t] * B[t,t2] for t=min(i,j):max(i,j)], TrapezoidalFast())
+  ∫dt′(i,j,A,B) = sign(j-i) * integrate(times[min(i,j):max(i,j)], 
+    [-A[t1,t] * B[t2,t]' for t=min(i,j):max(i,j)], TrapezoidalFast())
 
   # conduction electron
   dGᶜL = -1.0im * (-1.0im * σ * GᶜL[t1,t2])
   dGᶜG = -1.0im * (-1.0im * σ * GᶜG[t1,t2])
   
   # pseudo fermion
-  dGᶠL = -1.0im * ((ε₀f-λ₀) * GᶠL[t1,t2] + ∫dt(1,t1,ΣᶠG,GᶠL) - ∫dt(1,t2,ΣᶠL,GᶠG))
+  dGᶠL = -1.0im * ((ε₀f-λ₀) * GᶠL[t1,t2] + ∫dt(t2,t1,ΣᶠG,GᶠL) + ∫dt′(1,t2,ΣᶠG,GᶠL) - ∫dt′(1,t2,ΣᶠL,GᶠG))
   dGᶠG = -1.0im * ((ε₀f-λ₀) * GᶠG[t1,t2] + ∫dt(t2,t1,ΣᶠG,GᶠG))
   
   # slave boson
-  dGᵇL = -1.0im * (-λ₀ * GᵇL[t1,t2] + ∫dt(1,t1,ΣᵇG,GᵇL) - ∫dt(1,t2,ΣᵇL,GᵇG))
+  dGᵇL = -1.0im * (-λ₀ * GᵇL[t1,t2] + ∫dt(t2,t1,ΣᵇG,GᵇL) + ∫dt′(1,t2,ΣᵇG,GᵇL) - ∫dt′(1,t2,ΣᵇL,GᵇG))
   dGᵇG = -1.0im * (-λ₀ * GᵇG[t1,t2] + ∫dt(t2,t1,ΣᵇG,GᵇG))
   
   # thz pulse
@@ -181,7 +183,7 @@ function f_diag_time(model::PhotonAssitedModel,data::ProblemData,times,t1)
   @unpack hᵧ,γ,λ,δ₀ = model
 
   # real-time collision integral
-  ∫dt(A,B) = integrate(times, [A[t1,t] * B[t,t1] for t=1:t1], TrapezoidalFast())
+  ∫dt(A,B) = integrate(times, [-A[t1,t] * B[t1,t]' for t=1:t1], TrapezoidalFast())
 
   # commutator
   ⋊(a,b) = a * b - b * adjoint(a)
@@ -270,7 +272,7 @@ function f_line_freq(model::PhotonAssitedModel,data::ProblemData,times,t1)
   @unpack ε₀f,λ₀,σ = model
 
   # real-time collision integral
-  ∫dt(A,B) = integrate(times, [A[t] .* B[t,t1] for t=1:t1], TrapezoidalFast())
+  ∫dt(A,B) = integrate(times, [-A[t] .* B[t1,t]' for t=1:t1], TrapezoidalFast())
   
   # conduction electron
   dAᶜ˹ = +1.0im * (+1.0im .* σ .* Aᶜ˹[t1])
@@ -296,11 +298,13 @@ function calculate_Σ_time!(model::PhotonAssitedModel,data::ProblemData,t1,t2)
     resize!(ΣᵇL,n)
     resize!(ΣᵇG,n)
   end
-  
-  ΣᶠL[t1,t2] = +1.0im * GᶜL[t1,t2] * (V₀^2 + Γ₀^2 * (GᵞL[t1,t2] + GᵞG[t2,t1])) * GᵇL[t1,t2]
-  ΣᶠG[t1,t2] = +1.0im * GᶜG[t1,t2] * (V₀^2 + Γ₀^2 * (GᵞL[t1,t2] + GᵞG[t2,t1])) * GᵇG[t1,t2]
-  ΣᵇL[t1,t2] = -2.0im * GᶠL[t1,t2] * (V₀^2 + Γ₀^2 * (GᵞL[t1,t2] + GᵞG[t2,t1])) * GᶜG[t2,t1]
-  ΣᵇG[t1,t2] = -2.0im * GᶠG[t1,t2] * (V₀^2 + Γ₀^2 * (GᵞL[t1,t2] + GᵞG[t2,t1])) * GᶜL[t2,t1]
+
+  V² = V₀^2 + 1.0im * Γ₀^2 * (GᵞL[t1,t2] + GᵞG[t1,t2])
+
+  ΣᶠL[t1,t2] = +1.0im * V² * GᵇL[t1,t2] * GᶜL[t1,t2]
+  ΣᶠG[t1,t2] = +1.0im * V² * GᵇG[t1,t2] * GᶜG[t1,t2]
+  ΣᵇL[t1,t2] = -2.0im * V² * GᶠL[t1,t2] * GᶜG[t2,t1]
+  ΣᵇG[t1,t2] = -2.0im * V² * GᶠG[t1,t2] * GᶜL[t2,t1]
 end
 
 function calculate_Σ_freq!(model::PhotonAssitedModel,data::ProblemData,t1)
