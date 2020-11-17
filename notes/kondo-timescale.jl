@@ -1,5 +1,5 @@
 ### A Pluto.jl notebook ###
-# v0.12.7
+# v0.12.10
 
 using Markdown
 using InteractiveUtils
@@ -8,7 +8,7 @@ using InteractiveUtils
 begin
 	using NCA
 	using KadanoffBaym
-	using KadanoffBaym: FFTW
+	using KadanoffBaym.FFTW: fftfreq, fft
 	using LinearAlgebra
 	using Plots
 end
@@ -24,19 +24,20 @@ nca = FreqNCA(
 )
 
 # ╔═╡ 4f90dc0a-2509-11eb-305a-e7fcb0ba1e50
-imΣ_t = NCA.solve!(nca; project=false)
+x = NCA.slave_particle_imG(nca, NCA.solve!(nca; project=false)) ./ pi
 
 # ╔═╡ a5ef4166-2595-11eb-0a12-dfc7e0794078
 begin
 	ωs = nca.mesh.mesh
+	dω= ωs[2] - ωs[1]
 	
-	ts = FFTW.fftfreq(length(ωs), 2π/(nca.mesh.dx))
+	ts = fftfreq(length(ωs), 2π/dω)
 	is = sortperm(ts)
 	
-	# NOTE: The Greater function shows interesting features
-	x = nca.data.imG_t # Greater
-	# x = mapslices(x -> x .* nca.data.fermi, x, dims=1)    # Lesser
-	# x = mapslices(x -> x .* nca.data.fermi⁻, x, dims=1) # "Spectral function"
+	ℯⁱᵠ = dω * exp.(1.0im * ωs[1] .* ts)
+	
+	L = mapslices(x -> ℯⁱᵠ .* fft(x .* nca.data.fermi), x, dims=1)  # Lesser
+	G = mapslices(x -> ℯⁱᵠ .* fft(x .* nca.data.fermi⁻), x, dims=1) # Spectral
 end
 
 # ╔═╡ 5144c37a-2509-11eb-09c6-a5b11391865c
@@ -52,21 +53,26 @@ begin
 	heatmap(
 		ts[is][1:10:end] .+ ts[is[end]], 
 		ωs[1:10:end], 
-		X[1:10:end,1:10:end] |> real)
+		X[1:10:end,1:10:end] |> real, xlabel="t", ylabel="ω")
+end
+
+# ╔═╡ a34a132c-26b0-11eb-2270-b95c8425be03
+begin	
+	plot(ts[is], L[is,1] .|> real, label="GL_b")
+	plot!(ts[is], L[is,2] .|> real, label="GL_f")
+	xlims!(-100,100)
 end
 
 # ╔═╡ df7b1ab6-25b2-11eb-3d39-69d22eee1ccc
-begin
-	y = nca.mesh.dx * exp.(1.0im * ωs[1] .* ts) .* FFTW.fft(x, [1])
-	
-	plot(ts[is], y[is,1] .|> real)
-	plot!(ts[is], y[is,2] .|> real)
-	xlims!(-200,200)
+begin	
+	plot(ts[is], G[is,1] .|> real, label="GG_b")
+	plot!(ts[is], G[is,2] .|> real, label="GG_f")
+	xlims!(-100,100)
 end
 
 # ╔═╡ e76a6498-25b2-11eb-1172-1773740ccf31
 begin
-	Y = repeat(y[:,1], outer=[1,length(ωs)])
+	Y = repeat(L[:,2], outer=[1,length(ωs)])
 	
 	heatmap(
 		ts[is][1:10:end] .+ ts[is[end]],
@@ -81,8 +87,8 @@ begin
 		
 		L2 = size(Z_,1) ÷ 2
 		for i in 1:L2
-			view(Z_, diagind(Z_, i)) .= y[i]
-			view(Z_, diagind(Z_, -i)) .= y[2L2-i]
+			view(Z_, diagind(Z_, i)) .= L[i]
+			view(Z_, diagind(Z_, -i)) .= L[2L2-i]
 		end
 		Z_
 	end
@@ -100,6 +106,7 @@ end
 # ╠═a5ef4166-2595-11eb-0a12-dfc7e0794078
 # ╠═5144c37a-2509-11eb-09c6-a5b11391865c
 # ╠═d5927c1a-25b2-11eb-1f8a-2f5e572722e7
+# ╠═a34a132c-26b0-11eb-2270-b95c8425be03
 # ╠═df7b1ab6-25b2-11eb-3d39-69d22eee1ccc
 # ╠═e76a6498-25b2-11eb-1172-1773740ccf31
 # ╠═edae77b8-25b2-11eb-3859-f338370be8ba
