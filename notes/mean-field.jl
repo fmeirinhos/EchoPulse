@@ -160,32 +160,38 @@ end
 begin
 	using DifferentialEquations: DDEProblem, DDEFunction, MethodOfSteps, QBDF
 	
+	# Photon occupation
+	function ξ(t; Ω=2.0,tc=5)
+	  return (Ω^2 / (2π))^(1/4) * exp(-(t - tc)^2 * (Ω^2 / 4))
+	end
+	
+	# Photon-matter interaction strength
+	const Γ = sqrt(0.2)
+	
 	"""
 	Slave boson mean-field equations in time
 	"""
 	function sbmf(u, h, p, t)
 		println(" t: $t")
-
-		# Interpolated values are given to the internal integrator for `n`
-		b(t) = h(p,t)[1] + 1.0im * h(p,t)[2]
-		λ(t) = h(p,t)[3]
 		
-		# Sum over all momenta
-		n = ∫dk(k -> begin
-			g = GL(t, k, p[1], b, λ)
-			SVector{2}(g[2,2], g[2,1])
-		end)
-		
-		# Actual values (just to make sure) are used for the DAEs
 		b = u[1] + 1.0im * u[2]
 		λ = u[3]
 		
-		db = -1.0im * ((λ - pam0.ε₀f) * b + pam0.V₀ * n[2])
-		u1 = real(db)
-		u2 = imag(db)
-		u3 = abs2(b) + n[1] - 1 |> real
-
-		return [u1, u2, u3]
+		# Sum over all momenta
+		n = ∫dk(k -> begin
+			g = GL(t, k, p[1], t -> h(p,t)[1] + 1.0im * h(p,t)[2], t -> h(p,t)[3])
+			α = g[2,1] * b' + g[1,2] * b
+			dαdb = g[2,1] + p[1].V₀ * (b * g[1,1] * g[2,2] + b' * g[2,1]^2)
+			dαdλ = g[2,2] * (g[1,2] * b + g[2,1] * b')
+			SVector{5}(g[2,2], g[2,1], α, dαdb, dαdλ)
+		end)
+		
+		db = -1.0im * ((λ - p[1].ε₀f) * b + p[1].V₀ * n[2])
+		db+= -1.0im * (2Γ^2 * ξ(t) * n[3] * n[4])
+		dλ = abs2(b) + n[1] - 1
+		dλ+= 2Γ^2 * ξ(t) * n[3] * n[5]
+		
+		return [real(db), imag(db), real(dλ)]
 	end
 	
 	# History function ({b(t), λ(t)} for t < 0)
