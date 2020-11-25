@@ -1,10 +1,10 @@
 using NCA, NLsolve
 using KadanoffBaym, ElasticArrays
 using NumericalIntegration
-using Parameters
+using Parameters: @unpack
 using Test
 
-@with_kw mutable struct PhotonAssitedModel
+Base.@kwdef mutable struct PhotonAssitedModel
   # single impurity Anderson model parameters
   V₀::Float64     # hybridization strength
   ε₀f::Float64    # f-electron ground state energy
@@ -34,7 +34,7 @@ struct ProblemData{T,U}
   ΣᵇL::GreenFunction{T, Array{T,2}, Lesser}
   ΣᵇG::GreenFunction{T, Array{T,2}, Greater}
 
-  Aᶜ˹::GreenFunction{T, <:ElasticArray{T,2}, MixedGreater}
+  GᶜA::GreenFunction{T, <:ElasticArray{T,2}, MixedGreater}
   GᶠT::GreenFunction{T, <:ElasticArray{T,2}, MixedGreater}
   GᶠM::GreenFunction{T, <:ElasticArray{T,2}, MixedGreater}
   GᵇT::GreenFunction{T, <:ElasticArray{T,2}, MixedGreater}
@@ -45,7 +45,7 @@ struct ProblemData{T,U}
   ΣᵇT::GreenFunction{T, <:ElasticArray{T,2}, MixedGreater}
   ΣᵇM::GreenFunction{T, <:ElasticArray{T,2}, MixedGreater}
   
-  freqs::LinearMesh{U}
+  mesh::LinearMesh{U}
   fermi::Vector{U}
   fermi⁻::Vector{U}
   th½::Vector{U}
@@ -57,7 +57,7 @@ function ProblemData(model::PhotonAssitedModel, β::Real, mesh, nᵞ::Real)
 
     # Equilibrium model
     nca = FreqNCA(
-      model=NCA.SIAM(
+      model=SIAM(
         V₀=model.V₀,
         ε₀f=model.ε₀f,
         tilde=true,
@@ -82,14 +82,14 @@ function ProblemData(model::PhotonAssitedModel, β::Real, mesh, nᵞ::Real)
   model.λ₀ = nca.model.λ
 
   # Create a new frequency grid that supports complex convolutions
-  freqs = NCA.LinearMesh(nca.mesh.xmin, nca.mesh.xmax, nca.mesh.L, true);
-  ∫dω(f) = integrate(freqs.mesh, f, TrapezoidalEvenFast()) / (2π)
+  mesh = NCA.LinearMesh(nca.mesh.xmin, nca.mesh.xmax, nca.mesh.L, true);
+  ∫dω(f) = integrate(mesh.mesh, f, TrapezoidalEvenFast()) / (2π)
 
   @unpack fermi,fermi⁻,th½, Nc = nca.data
 
   GᶜL = GreenFunction(ones(1,1) * (+1.0im * ∫dω(fermi .* Nc)), Lesser)
   GᶜG = GreenFunction(ones(1,1) * (-1.0im * ∫dω(fermi⁻ .* Nc)), Greater)
-  Aᶜ˹ = GreenFunction(ElasticArray(hcat(1.0im * Nc)), MixedGreater)
+  GᶜA = GreenFunction(ElasticArray(hcat(1.0im * Nc)), MixedGreater)
 
   GᶠL = GreenFunction(ones(1,1) * (+1.0im * ∫dω(fermi .* 2imG_t[:,2])), Lesser)
   GᶠG = GreenFunction(ones(1,1) * (-1.0im), Greater)
@@ -117,12 +117,12 @@ function ProblemData(model::PhotonAssitedModel, β::Real, mesh, nᵞ::Real)
     typeof(GᶠG)(zero(GᶠG.data)),
     typeof(GᵇL)(zero(GᵇL.data)),
     typeof(GᵇG)(zero(GᵇG.data)),
-    Aᶜ˹,GᶠT,GᶠM,GᵇT,GᵇM,
+    GᶜA,GᶠT,GᶠM,GᵇT,GᵇM,
     typeof(GᶠT)(ElasticArray(zero(GᶠT.data))),
     typeof(GᶠM)(ElasticArray(zero(GᶠM.data))),
     typeof(GᵇT)(ElasticArray(zero(GᵇT.data))),
     typeof(GᵇM)(ElasticArray(zero(GᵇM.data))),
-    freqs,fermi,fermi⁻,th½)
+    mesh,fermi,fermi⁻,th½)
 
   @testset "Σ equivalence between mixed and equilibrium formulations" begin
     calculate_Σ_time!(model, data, 1, 1)
@@ -200,10 +200,10 @@ function f_diag_time(model::PhotonAssitedModel,data::ProblemData,times,t1)
 end
 
 function f_vert_freq(model::PhotonAssitedModel,data::ProblemData,times,t1,t2)
-  @unpack GᶠT,GᶠM,GᵇT,GᵇM,ΣᶠT,ΣᶠM,ΣᵇT,ΣᵇM,freqs,fermi = data
+  @unpack GᶠT,GᶠM,GᵇT,GᵇM,ΣᶠT,ΣᶠM,ΣᵇT,ΣᵇM,mesh,fermi = data
 
   # real-frequency collision integral
-  ∫dω(f) = integrate(freqs.mesh, fermi .* f, TrapezoidalEvenFast()) / (2π)
+  ∫dω(f) = integrate(mesh.mesh, fermi .* f, TrapezoidalEvenFast()) / (2π)
 
   # conduction electron
   dGᶜL = 0.0
@@ -226,10 +226,10 @@ function f_vert_freq(model::PhotonAssitedModel,data::ProblemData,times,t1,t2)
 end
 
 function f_diag_freq(model::PhotonAssitedModel,data::ProblemData,times,t1)
-  @unpack GᶠT,GᶠM,GᵇT,GᵇM,ΣᶠT,ΣᶠM,ΣᵇT,ΣᵇM,freqs,fermi = data
+  @unpack GᶠT,GᶠM,GᵇT,GᵇM,ΣᶠT,ΣᶠM,ΣᵇT,ΣᵇM,mesh,fermi = data
 
   # real-frequency collision integral
-  ∫dω(f) = integrate(freqs.mesh, fermi .* f, TrapezoidalEvenFast()) / (2π)
+  ∫dω(f) = integrate(mesh.mesh, fermi .* f, TrapezoidalEvenFast()) / (2π)
 
   # conduction electron: thermal contributions ∝ ζ → 0
   dGᶜL = 0.0
@@ -255,7 +255,7 @@ function f_diag_freq(model::PhotonAssitedModel,data::ProblemData,times,t1)
 end
 
 function f_line_freq(model::PhotonAssitedModel,data::ProblemData,times,t1)
-  @unpack Aᶜ˹,GᶠT,GᶠM,GᵇT,GᵇM,ΣᶠT,ΣᶠM,ΣᵇT,ΣᵇM = data
+  @unpack GᶜA,GᶠT,GᶠM,GᵇT,GᵇM,ΣᶠT,ΣᶠM,ΣᵇT,ΣᵇM = data
   @unpack GᶜL,GᶜG,GᶠL,GᶠG,GᵇL,GᵇG,GᵞL,GᵞG,ΣᶠG,ΣᵇG = data
   @unpack ε₀f,λ₀,σ = model
 
@@ -263,7 +263,7 @@ function f_line_freq(model::PhotonAssitedModel,data::ProblemData,times,t1)
   ∫dt(A,B) = integrate(times, [-A[t] .* B[t1,t]' for t=1:t1], TrapezoidalFast())
   
   # conduction electron
-  dAᶜ˹ = +1.0im * (+1.0im .* σ .* Aᶜ˹[t1])
+  dGᶜA = +1.0im * (+1.0im .* σ .* GᶜA[t1])
 
   # pseudo fermion
   dGᶠT = +1.0im * ((ε₀f + λ₀).*GᶠT[t1] .- ∫dt(GᶠT, ΣᶠG) .+ GᶠT[1] .* ΣᶠM[t1] .+ conj(GᶠM[1]) .* ΣᶠT[t1])
@@ -273,12 +273,12 @@ function f_line_freq(model::PhotonAssitedModel,data::ProblemData,times,t1)
   dGᵇT = +1.0im * (λ₀ .* GᵇT[t1] .- ∫dt(GᵇT, ΣᵇG) .+ GᵇT[1] .* ΣᵇM[t1] .+ conj(GᵇM[1]) .* ΣᵇT[t1])
   dGᵇM = +1.0im * (λ₀ .* GᵇM[t1] .- ∫dt(GᵇM, ΣᵇG) .+ GᵇM[1] .* ΣᵇM[t1])
 
-  return [dAᶜ˹, dGᶠT, dGᶠM, dGᵇT, dGᵇM]
+  return [dGᶜA, dGᶠT, dGᶠM, dGᵇT, dGᵇM]
 end
 
 function calculate_Σ_time!(model::PhotonAssitedModel,data::ProblemData,t1,t2)
-  @unpack V₀,Γ₀ = model
   @unpack GᶜL,GᶜG,GᶠL,GᶠG,GᵇL,GᵇG,GᵞL,GᵞG,ΣᶠL,ΣᶠG,ΣᵇL,ΣᵇG = data
+  @unpack V₀,Γ₀ = model
   
   if (n = size(GᶜL,2)) > size(ΣᶠL,2)
     resize!(ΣᶠL,n)
@@ -296,11 +296,11 @@ function calculate_Σ_time!(model::PhotonAssitedModel,data::ProblemData,t1,t2)
 end
 
 function calculate_Σ_freq!(model::PhotonAssitedModel,data::ProblemData,t1)
+  @unpack GᶜA,GᶠT,GᶠM,GᵇT,GᵇM,ΣᶠT,ΣᶠM,ΣᵇT,ΣᵇM = data
+  @unpack mesh, fermi, fermi⁻, th½ = data
   @unpack V₀ = model
-  @unpack Aᶜ˹,GᶠT,GᶠM,GᵇT,GᵇM,ΣᶠT,ΣᶠM,ΣᵇT,ΣᵇM = data
-  @unpack freqs, fermi, fermi⁻, th½ = data
-    
-  if (n = size(Aᶜ˹,2)) > size(ΣᶠT,2)
+  
+  if (n = size(GᶜA,2)) > size(ΣᶠT,2)
     resize!(ΣᶠT,n)
     resize!(ΣᶠM,n)
     resize!(ΣᵇT,n)
@@ -308,12 +308,12 @@ function calculate_Σ_freq!(model::PhotonAssitedModel,data::ProblemData,t1)
   end
   
   ΣᶠT[t1] = -0.5im * V₀^2 / (2π) .* (
-    NCA.conv(freqs, Aᶜ˹[t1], GᵇT[t1]) + NCA.conv(freqs, th½ .* Aᶜ˹[t1], th½ .* GᵇT[t1]))
-  ΣᶠM[t1] = -1.0im * V₀^2 / (2π) .* NCA.conv(freqs, fermi⁻ .* Aᶜ˹[t1], GᵇM[t1])
+    NCA.conv(mesh, GᶜA[t1], GᵇT[t1]) + NCA.conv(mesh, th½ .* GᶜA[t1], th½ .* GᵇT[t1]))
+  ΣᶠM[t1] = -1.0im * V₀^2 / (2π) .* NCA.conv(mesh, fermi⁻ .* GᶜA[t1], GᵇM[t1])
   
   ΣᵇT[t1] = +1.0im * V₀^2 / (2π) .* (
-    NCA.xcorr(freqs, Aᶜ˹[t1], GᶠT[t1]) - NCA.xcorr(freqs, th½ .* Aᶜ˹[t1], th½ .* GᶠT[t1]))
-  ΣᵇM[t1] = +2.0im * V₀^2 / (2π) .* NCA.xcorr(freqs, fermi .* Aᶜ˹[t1], GᶠM[t1])
+    NCA.xcorr(mesh, GᶜA[t1], GᶠT[t1]) - NCA.xcorr(mesh, th½ .* GᶜA[t1], th½ .* GᶠT[t1]))
+  ΣᵇM[t1] = +2.0im * V₀^2 / (2π) .* NCA.xcorr(mesh, fermi .* GᶜA[t1], GᶠM[t1])
 end
 
 function NumericalIntegration._zero(x, y::Vector{<:AbstractVector})

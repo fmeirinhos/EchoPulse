@@ -50,9 +50,9 @@ end;
 
 # ╔═╡ 376c9bfc-1d05-11eb-2f4e-331c0302a14b
 begin
-	plot(data.freqs.mesh, data.GᵇT[1] |> imag, label=L"$A_b$")
-	plot!(data.freqs.mesh, data.GᶠT[1] |> imag, label=L"$A_f$")
-	plot!(data.freqs.mesh, data.Aᶜ˹[1] |> imag, label=L"$A_c$")
+	plot(data.mesh.mesh, data.GᵇT[1] |> imag, label=L"$A_b$")
+	plot!(data.mesh.mesh, data.GᶠT[1] |> imag, label=L"$A_f$")
+	plot!(data.mesh.mesh, data.GᶜA[1] |> imag, label=L"$A_c$")
 	title!("Tilde spectral functions")
 	xlabel!(L"$\omega$")
 end
@@ -61,7 +61,7 @@ end
 begin
 	# Initial condition
 	u0 = [data.GᶜL,data.GᶜG,data.GᶠL,data.GᶠG,data.GᵇL,data.GᵇG,data.GᵞL,data.GᵞG]
-	l0 = [data.Aᶜ˹,data.GᶠT,data.GᶠM,data.GᵇT,data.GᵇM]
+	l0 = [data.GᶜA,data.GᶠT,data.GᶠM,data.GᵇT,data.GᵇM]
 	
 	# Vertical step
 	f_vert(u, times, t1::Int, t2::Int) = M.f_vert_time(model, data, times, t1, t2)
@@ -110,7 +110,7 @@ begin
 	
 	# Extract info
 	@unpack GᶜL,GᶜG,GᶠL,GᶠG,GᵇL,GᵇG,GᵞL,GᵞG,ΣᶠG,ΣᵇG,ΣᶠL,ΣᵇL = data
-	@unpack Aᶜ˹,GᶠT,GᶠM,GᵇT,GᵇM,ΣᶠT,ΣᶠM,ΣᵇT,ΣᵇM,freqs,fermi,fermi⁻ = data
+	@unpack GᶜA,GᶠT,GᶠM,GᵇT,GᵇM,ΣᶠT,ΣᶠM,ΣᵇT,ΣᵇM,mesh,fermi,fermi⁻ = data
 	times = sol.t;
 end;
 
@@ -119,7 +119,7 @@ end;
 begin
 	using KadanoffBaym.FFTW
 	
-	ωs = data.freqs.mesh
+	ωs = mesh
 	dω= ωs[2] - ωs[1]
 	
 	ts = fftfreq(length(ωs), 2π/dω)
@@ -127,7 +127,7 @@ begin
 	
 	ℯⁱᵠ = dω * exp.(1.0im * ωs[1] .* ts)
 	
-	x = hcat(0.5 * data.GᵇT[1], 0.5 * data.GᶠT[1], 0.5 * data.Aᶜ˹[1]) ./ pi
+	x = hcat(0.5 * data.GᵇT[1], 0.5 * data.GᶠT[1], 0.5 * data.GᶜA[1]) ./ pi
 	L = mapslices(x -> ℯⁱᵠ .* fft(x .* data.fermi), x, dims=1)  # Lesser
 	G = mapslices(x -> ℯⁱᵠ .* fft(x .* data.fermi⁻), x, dims=1) # Spectral
 	
