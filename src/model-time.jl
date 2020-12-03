@@ -1,5 +1,5 @@
 using NCA, NLsolve
-using NCA.FFTW: fftfreq, fft
+using NCA.FFTW: fftfreq, ifft
 using KadanoffBaym
 using NumericalIntegration
 using Parameters: @unpack
@@ -79,10 +79,10 @@ function ProblemData(model::PhotonAssitedModel, β::Real, mesh, nᵞ::Real)
   L = mapslices(imG_t, dims=1) do x
     im_ = x .* nca.data.fermi
     re_ = NCA.kramerskronig(nca.mesh, im_, :real)
-    complex.(real(ℯⁱᵠ .* fft(re_)), real(ℯⁱᵠ .* fft(im_)))
+    ℯⁱᵠ .* ifft(re_ .+ 1.0im * im_) * length(ts)
   end
   G = mapslices(G_, dims=1) do x
-    complex.(real(ℯⁱᵠ .* fft(real(x))), real(ℯⁱᵠ .* fft(imag(x))))
+    ℯⁱᵠ .* ifft(x) * length(ts)
   end
 
   function G∞(g)
