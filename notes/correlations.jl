@@ -162,6 +162,18 @@ begin
 	# plot!(ts, G[:,3] |> imag, label="G_c Greater equi")
 	# plot!(τs, -diag(reverse(GᶜG.data, dims=2)) |> imag, label="G_c Greater time")
 	
+	# plot(ts, -M.ft(mesh, data.fermi⁻ .* data.ΣᵇT[1] / (2pi))[2] |> imag)
+	# plot!(τs, -2.0im * model.V₀^2 * diag(reverse(GᶠG.data, dims=2)) .* diag(reverse(-GᶜL.data', dims=2)) .|> imag)
+	
+	# plot(ts, -M.ft(mesh, data.fermi .* data.ΣᵇT[1] / (2pi))[2] |> imag)
+	# plot!(τs, -2.0im * model.V₀^2 * diag(reverse(GᶠL.data, dims=2)) .* diag(reverse(-GᶜG.data', dims=2)) .|> imag)
+	
+	# plot(ts, M.ft(mesh, data.fermi .* data.ΣᶠT[1] / (2pi))[2] |> imag)
+	# plot!(τs, +1.0im * model.V₀^2 * diag(reverse(GᵇL.data, dims=2)) .* diag(reverse(GᶜL.data, dims=2)) .|> imag)
+	
+	# plot(ts, -M.ft(mesh, data.fermi⁻ .* data.ΣᶠT[1] / (2pi))[2] |> imag)
+	# plot!(τs, +1.0im * model.V₀^2 * diag(reverse(GᵇG.data, dims=2)) .* diag(reverse(GᶜG.data, dims=2)) .|> imag)
+	
 	xlims!(0.25τs[1], 0.25τs[end])
 end
 
@@ -178,24 +190,32 @@ begin
 	# plot!(mesh.mesh, data.fermi .* data.GᵇT[1] |> imag)
 	
 	# itp = interpolate((τs,), diag(reverse(GᵇG.data, dims=2)), Gridded(Linear()))
-	# plot(ωs, -0.5M.ft(τs_, itp.(τs_))[2] |> imag)
-	# plot!(mesh.mesh, data.GᵇM[1] |> imag)
+	# plot(ωs, -M.ft(τs_, itp.(τs_))[2] |> imag)
+	# plot!(mesh.mesh, data.fermi⁻ .* data.GᵇT[1] |> imag)
 	
 	# itp = interpolate((τs,), diag(reverse(GᶠL.data, dims=2)), Gridded(Linear()))
 	# plot(ωs, M.ft(τs_, itp.(τs_))[2] |> imag)
 	# plot!(mesh.mesh, data.fermi .* data.GᶠT[1] |> imag)
 	
 	# itp = interpolate((τs,), diag(reverse(GᶠG.data, dims=2)), Gridded(Linear()))
-	# plot(ωs, -0.5M.ft(τs_, itp.(τs_))[2] |> imag)
-	# plot!(mesh.mesh, data.GᶠM[1] |> imag)
+	# plot(ωs, -M.ft(τs_, itp.(τs_))[2] |> imag)
+	# plot!(mesh.mesh, data.fermi⁻ .* data.GᶠT[1] |> imag)
 	
-	# itp = interpolate((τs,), +1.0im * model.V₀^2 * diag(reverse(GᵇG.data, dims=2)) .* diag(reverse(GᶜG.data, dims=2)), Gridded(Linear()))
-	# plot(ωs, -0.5M.ft(τs_, itp.(τs_))[2] .|> imag)
-	# plot!(mesh.mesh, data.ΣᶠM[1] |> imag)
+	# itp = interpolate((τs,), -2.0im * model.V₀^2 * diag(reverse(GᶠL.data, dims=2)) .* diag(reverse(-GᶜG.data', dims=2)), Gridded(Linear()))
+	# plot(ωs, -M.ft(τs_, itp.(τs_))[2] .|> imag)
+	# plot!(mesh.mesh, data.fermi .* data.ΣᵇT[1] |> imag)
 	
 	# itp = interpolate((τs,), -2.0im * model.V₀^2 * diag(reverse(GᶠG.data, dims=2)) .* diag(reverse(-GᶜL.data', dims=2)), Gridded(Linear()))
-	# plot(ωs, -0.5M.ft(τs_, itp.(τs_))[2] .|> imag)
-	# plot!(mesh.mesh, data.ΣᵇM[1] |> imag)
+	# plot(ωs, -M.ft(τs_, itp.(τs_))[2] .|> imag)
+	# plot!(mesh.mesh, data.fermi⁻ .* data.ΣᵇT[1] |> imag)
+	
+	# itp = interpolate((τs,), +1.0im * model.V₀^2 * diag(reverse(GᵇL.data, dims=2)) .* diag(reverse(GᶜL.data, dims=2)), Gridded(Linear()))
+	# plot(ωs, M.ft(τs_, itp.(τs_))[2] .|> imag)
+	# plot!(mesh.mesh, data.fermi .* data.ΣᶠT[1] |> imag)
+	
+	# itp = interpolate((τs,), +1.0im * model.V₀^2 * diag(reverse(GᵇG.data, dims=2)) .* diag(reverse(GᶜG.data, dims=2)), Gridded(Linear()))
+	# plot(ωs, -M.ft(τs_, itp.(τs_))[2] .|> imag)
+	# plot!(mesh.mesh, data.fermi⁻ .* data.ΣᶠT[1] |> imag)
 end
 
 # ╔═╡ 19b432e6-1d14-11eb-1770-fda8ed6ad743
