@@ -50,7 +50,7 @@ end;
 # ╔═╡ f0172c84-33ea-11eb-3760-d98cfb0c7ba5
 begin
 	# Initial condition
-	u0 = [data.GᶜL,data.GᶜG,data.GᶠL,data.GᶠG,data.GᵇL,data.GᵇG]
+	u0 = [data.GᶠL,data.GᶠG,data.GᵇL,data.GᵇG]
 	
 	# Vertical step
 	f_vert(u, times, t1::Int, t2::Int) = M.f_vert_time(model, data, times, t1, t2)

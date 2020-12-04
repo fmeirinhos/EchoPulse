@@ -5,6 +5,7 @@ using NumericalIntegration
 using Parameters: @unpack
 using Test
 using LinearAlgebra: diagind
+include("util.jl")
 
 Base.@kwdef mutable struct PhotonAssitedModel
   # single impurity Anderson model parameters
@@ -39,7 +40,7 @@ end
 
 function ProblemData(model::PhotonAssitedModel, β::Real, mesh, nᵞ::Real)
   # Get the correlated tilde and non-tilde Green functions
-  imG_t, G_ = begin
+  A_, G_ = begin
 
     # Equilibrium model
     nca = FreqNCA(
@@ -58,50 +59,43 @@ function ProblemData(model::PhotonAssitedModel, β::Real, mesh, nᵞ::Real)
       imΣ′ - imΣ
     end.zero
     
-    # Get observables
-    imG_t = NCA.slave_particle_imG(nca, imΣ_t)
     G = 1 ./ NCA.slave_particle_inv_gf(nca, NCA.slave_particle_Σ(nca, imΣ_t))
     Gc = complex.(NCA.kramerskronig(nca.mesh, 0.5 * nca.data.Nc, :real), 0.5 * nca.data.Nc) .* nca.data.fermi⁻
-    hcat(imG_t, 0.5 * nca.data.Nc) ./ pi, hcat(G, Gc) ./ pi
+
+    # Get observables
+    hcat(2NCA.slave_particle_imG(nca, imΣ_t), nca.data.Nc) ./ (2pi), hcat(G, Gc) ./ pi
   end
 
   # Update gauge chem potential
   model.λ₀ = nca.model.λ
 
-  ωs = nca.mesh.mesh
-  dω= ωs[2] - ωs[1]
+  ts = ft(nca.mesh, zero(nca.mesh.mesh); mode=+1)[1]
   
-  ts = fftfreq(length(ωs), 2π/dω)
-  is = sortperm(ts)
-  
-  ℯⁱᵠ = dω * exp.(1.0im * ωs[1] .* ts)
-  
-  L = mapslices(imG_t, dims=1) do x
+  L = mapslices(A_, dims=1) do x
     im_ = x .* nca.data.fermi
-    re_ = NCA.kramerskronig(nca.mesh, im_, :real)
-    ℯⁱᵠ .* ifft(re_ .+ 1.0im * im_) * length(ts)
+    ft(nca.mesh, 1.0im * im_; mode=+1)[2]
   end
-  G = mapslices(G_, dims=1) do x
-    ℯⁱᵠ .* ifft(x) * length(ts)
+  G = mapslices(A_, dims=1) do x
+    im_ = x .* nca.data.fermi⁻
+    ft(nca.mesh, 1.0im * im_; mode=+1)[2]
   end
 
-  function G∞(g)
-    Z_ = zeros(eltype(g), length(g), length(g))
+  function G∞(g; n=1)
+    Z_ = zeros(eltype(g), length(g)*n, length(g)*n)
     
-    L2 = size(Z_,1) ÷ 2
+    L2 = length(g) ÷ 2
 
-    Z_[diagind(Z_, 0)] .= 1.0im * imag(g[1])
+    Z_[diagind(Z_, 0)] .= 1.0im * imag(g[L2+1])
 
-    g = g[is]
     for i in 1:(L2-1)
-      view(Z_, diagind(Z_, +i)) .= g[L2+1+i]
-      view(Z_, diagind(Z_, -i)) .= g[L2+1-i]
+      Z_[diagind(Z_, +i)] .= g[L2+1+i]
+      Z_[diagind(Z_, -i)] .= g[L2+1-i]
     end
     return Z_
   end
 
-  GᶜL = GreenFunction(G∞(L[:,3]), Lesser)
-  GᶜG = GreenFunction(-G∞(G[:,3]), Greater)
+  GᶜL = GreenFunction(G∞(L[:,3]; n=2), Lesser)
+  GᶜG = GreenFunction(-G∞(G[:,3]; n=2), Greater)
 
   GᶠL = GreenFunction(G∞(L[:,2]), Lesser)
   GᶠG = GreenFunction(-G∞(G[:,2]), Greater)
@@ -122,7 +116,7 @@ function ProblemData(model::PhotonAssitedModel, β::Real, mesh, nᵞ::Real)
     typeof(GᶠG)(zero(GᶠG.data)),
     typeof(GᵇL)(zero(GᵇL.data)),
     typeof(GᵇG)(zero(GᵇG.data)),
-    ts[is] .- ts[is[end]])
+    ts .- ts[end])
 
   return data
 end
@@ -133,16 +127,12 @@ function f_vert_time(model::PhotonAssitedModel,data::ProblemData,times,t1,t2)
 
   ΣᶠL(t1,t2) = +1.0im * V₀^2 * GᵇL[t1,t2] * GᶜL[t1,t2]
   ΣᶠG(t1,t2) = +1.0im * V₀^2 * GᵇG[t1,t2] * GᶜG[t1,t2]
-  ΣᵇL(t1,t2) = +2.0im * V₀^2 * GᶠL[t1,t2] * GᶜG[t1,t2]'
-  ΣᵇG(t1,t2) = +2.0im * V₀^2 * GᶠG[t1,t2] * GᶜL[t1,t2]'
+  ΣᵇL(t1,t2) = -2.0im * V₀^2 * GᶠL[t1,t2] * GᶜG[t2,t1]
+  ΣᵇG(t1,t2) = -2.0im * V₀^2 * GᶠG[t1,t2] * GᶜL[t2,t1]
 
   # real-time collision integral. NOTE: @assert t1 >= t2
   ∫dt(i,j,A,B) = sign(j-i) * integrate(times[min(i,j):max(i,j)], 
     [A(t1,t) * B[t,t2] for t=min(i,j):max(i,j)], Trapezoidal())
-
-  # conduction electron
-  dGᶜL = -1.0im * (-0.0 * GᶜL[t1,t2] - 1.0im * σ * GᶜL[t1,t2])
-  dGᶜG = -1.0im * (-0.0 * GᶜG[t1,t2] - 1.0im * σ * GᶜG[t1,t2])
   
   # pseudo fermion
   dGᶠL = -1.0im * ((ε₀f - λ₀) * GᶠL[t1,t2] + ∫dt(1,t1,ΣᶠG,GᶠL) - ∫dt(1,t2,ΣᶠL,GᶠG))
@@ -152,7 +142,7 @@ function f_vert_time(model::PhotonAssitedModel,data::ProblemData,times,t1,t2)
   dGᵇL = -1.0im * (-λ₀ * GᵇL[t1,t2] + ∫dt(1,t1,ΣᵇG,GᵇL) - ∫dt(1,t2,ΣᵇL,GᵇG))
   dGᵇG = -1.0im * (-λ₀ * GᵇG[t1,t2] + ∫dt(t2,t1,ΣᵇG,GᵇG))
   
-  return [dGᶜL, dGᶜG, dGᶠL, dGᶠG, dGᵇL, dGᵇG]
+  return [dGᶠL, dGᶠG, dGᵇL, dGᵇG]
 end
 
 function f_diag_time(model::PhotonAssitedModel,data::ProblemData,times,t1)
@@ -161,19 +151,12 @@ function f_diag_time(model::PhotonAssitedModel,data::ProblemData,times,t1)
 
   ΣᶠL(t1,t2) = +1.0im * V₀^2 * GᵇL[t1,t2] * GᶜL[t1,t2]
   ΣᶠG(t1,t2) = +1.0im * V₀^2 * GᵇG[t1,t2] * GᶜG[t1,t2]
-  ΣᵇL(t1,t2) = +2.0im * V₀^2 * GᶠL[t1,t2] * GᶜG[t1,t2]'
-  ΣᵇG(t1,t2) = +2.0im * V₀^2 * GᶠG[t1,t2] * GᶜL[t1,t2]'
+  ΣᵇL(t1,t2) = -2.0im * V₀^2 * GᶠL[t1,t2] * GᶜG[t2,t1]
+  ΣᵇG(t1,t2) = -2.0im * V₀^2 * GᶠG[t1,t2] * GᶜL[t2,t1]
 
   # real-time collision integral
   ∫dt(A::GreenFunction,B::Function) = integrate(times[1:t1], [A[t1,t] * B(t,t1) for t=1:t1], Trapezoidal())
   ∫dt(A::Function,B::GreenFunction) = integrate(times[1:t1], [A(t1,t) * B[t,t1] for t=1:t1], Trapezoidal())
-
-  # commutator
-  ⋊(a,b) = a * b - b * adjoint(a)
-
-  # conduction electron
-  dGᶜL = 0.0
-  dGᶜG = 0.0
 
   # pseudo fermion
   dGᶠL = -1.0im * (∫dt(ΣᶠG,GᶠL) - ∫dt(ΣᶠL,GᶠG) + ∫dt(GᶠL,ΣᶠG) - ∫dt(GᶠG,ΣᶠL))
@@ -183,5 +166,5 @@ function f_diag_time(model::PhotonAssitedModel,data::ProblemData,times,t1)
   dGᵇL = -1.0im * (∫dt(ΣᵇG,GᵇL) - ∫dt(ΣᵇL,GᵇG) + ∫dt(GᵇL,ΣᵇG) - ∫dt(GᵇG,ΣᵇL))
   dGᵇG = 0.0
   
-  return [dGᶜL, dGᶜG, dGᶠL, dGᶠG, dGᵇL, dGᵇG]
+  return [dGᶠL, dGᶠG, dGᵇL, dGᵇG]
 end

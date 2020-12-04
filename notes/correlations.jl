@@ -136,11 +136,11 @@ end
 # ╔═╡ aede18f0-360f-11eb-182f-0fbb1762f733
 # Comparison of frequency solution with time solution
 begin
-	ts = M.ft(mesh, zero(mesh.mesh), mode=1)
+	ts = M.ft(mesh, zero(mesh.mesh), mode=-1)
 	
 	x = hcat(data.GᵇT[1], data.GᶠT[1], data.GᶜA[1]) ./ (2pi)
-	L = mapslices(x -> M.ft(mesh, x .* data.fermi, mode=1)[2], x, dims=1) # Lesser
-	G = mapslices(x -> M.ft(mesh, x .* data.fermi⁻, mode=1)[2], x, dims=1) # Spectral
+	L = mapslices(x -> M.ft(mesh, x .* data.fermi, mode=-1)[2], x, dims=1) # Lesser
+	G = mapslices(x -> M.ft(mesh, x .* data.fermi⁻, mode=-1)[2], x, dims=1) # Spectral
 	
 	τs = sol.t - reverse(sol.t)
 	
@@ -159,7 +159,7 @@ begin
 	# plot(ts, L[:,3] |> imag, label="G_c Lesser equi")
 	# plot!(τs, diag(reverse(GᶜL.data, dims=2)) |> imag, label="G_c Lesser time")
 	
-	# plot!(ts, G[:,3] |> imag, label="G_c Greater equi")
+	# plot(ts, G[:,3] |> imag, label="G_c Greater equi")
 	# plot!(τs, -diag(reverse(GᶜG.data, dims=2)) |> imag, label="G_c Greater time")
 	
 	# plot(ts, -M.ft(mesh, data.fermi⁻ .* data.ΣᵇT[1] / (2pi))[2] |> imag)
