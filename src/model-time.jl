@@ -85,12 +85,14 @@ function ProblemData(model::PhotonAssitedModel, β::Real, mesh, nᵞ::Real)
     
     L2 = length(g) ÷ 2
 
-    Z_[diagind(Z_, 0)] .= 1.0im * imag(g[L2+1])
+    Z_[diagind(Z_, 0)] .= g[L2]
 
     for i in 1:(L2-1)
-      Z_[diagind(Z_, +i)] .= g[L2+1+i]
-      Z_[diagind(Z_, -i)] .= g[L2+1-i]
+      Z_[diagind(Z_, +i)] .= g[L2+i]
+      Z_[diagind(Z_, -i)] .= g[L2-i]
     end
+    @assert Z_ ≈ -Z_'
+    
     return Z_
   end
 
