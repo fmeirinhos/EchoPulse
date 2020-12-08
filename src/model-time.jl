@@ -5,6 +5,7 @@ using NumericalIntegration
 using Parameters: @unpack
 using Test
 using LinearAlgebra: diagind
+using Interpolations
 include("util.jl")
 
 Base.@kwdef mutable struct PhotonAssitedModel
@@ -23,8 +24,8 @@ Base.@kwdef mutable struct PhotonAssitedModel
 end
 
 struct ProblemData{T,U}
-  GᶜL::GreenFunction{T, Array{T,2}, Lesser}
-  GᶜG::GreenFunction{T, Array{T,2}, Greater}
+  GᶜL
+  GᶜG
   GᶠL::GreenFunction{T, Array{T,2}, Lesser}
   GᶠG::GreenFunction{T, Array{T,2}, Greater}
   GᵇL::GreenFunction{T, Array{T,2}, Lesser}
@@ -69,15 +70,16 @@ function ProblemData(model::PhotonAssitedModel, β::Real, mesh, nᵞ::Real)
   # Update gauge chem potential
   model.λ₀ = nca.model.λ
 
-  ts = ft(nca.mesh, zero(nca.mesh.mesh); mode=+1)[1]
+  ts = ft(nca.mesh, zero(nca.mesh.mesh); mode=-1)[1]
   
+  # The symmetry condition L/G(τ) = -L/G(-τ)* ⟹ L/G(ω) is purely imaginary
   L = mapslices(A_, dims=1) do x
     im_ = x .* nca.data.fermi
-    ft(nca.mesh, 1.0im * im_; mode=+1)[2]
+    ft(nca.mesh, 1.0im * im_; mode=-1)[2]
   end
   G = mapslices(A_, dims=1) do x
     im_ = x .* nca.data.fermi⁻
-    ft(nca.mesh, 1.0im * im_; mode=+1)[2]
+    ft(nca.mesh, 1.0im * im_; mode=-1)[2]
   end
 
   function G∞(g; n=1)
@@ -88,22 +90,22 @@ function ProblemData(model::PhotonAssitedModel, β::Real, mesh, nᵞ::Real)
     Z_[diagind(Z_, 0)] .= g[L2]
 
     for i in 1:(L2-1)
-      Z_[diagind(Z_, +i)] .= g[L2+i]
-      Z_[diagind(Z_, -i)] .= g[L2-i]
+      Z_[diagind(Z_, -i)] .= g[L2+i]
+      Z_[diagind(Z_, +i)] .= g[L2-i]
     end
     @assert Z_ ≈ -Z_'
     
     return Z_
   end
 
-  GᶜL = GreenFunction(G∞(L[:,3]; n=2), Lesser)
-  GᶜG = GreenFunction(-G∞(G[:,3]; n=2), Greater)
+  GᶜL = extrapolate(interpolate((ts,), +L[:,3], Gridded(Linear())), 0)
+  GᶜG = extrapolate(interpolate((ts,), -G[:,3], Gridded(Linear())), 0)
 
-  GᶠL = GreenFunction(G∞(L[:,2]), Lesser)
-  GᶠG = GreenFunction(-G∞(G[:,2]), Greater)
+  GᶠL = GreenFunction(G∞(+L[:,2]), Lesser)
+  GᶠG = GreenFunction(G∞(-G[:,2]), Greater)
 
-  GᵇL = GreenFunction(-G∞(L[:,1]), Lesser)  
-  GᵇG = GreenFunction(-G∞(G[:,1]), Greater)
+  GᵇL = GreenFunction(G∞(-L[:,1]), Lesser)  
+  GᵇG = GreenFunction(G∞(-G[:,1]), Greater)
 
   # Spectral report
   println("\nEquilibrium spectral function normalizations:")
@@ -127,10 +129,10 @@ function f_vert_time(model::PhotonAssitedModel,data::ProblemData,times,t1,t2)
   @unpack GᶜL,GᶜG,GᶠL,GᶠG,GᵇL,GᵇG = data #,ΣᶠL,ΣᶠG,ΣᵇL,ΣᵇG = data
   @unpack ε₀f,λ₀,σ,ω₀,δ₀,λ,γ,V₀ = model
 
-  ΣᶠL(t1,t2) = +1.0im * V₀^2 * GᵇL[t1,t2] * GᶜL[t1,t2]
-  ΣᶠG(t1,t2) = +1.0im * V₀^2 * GᵇG[t1,t2] * GᶜG[t1,t2]
-  ΣᵇL(t1,t2) = -2.0im * V₀^2 * GᶠL[t1,t2] * GᶜG[t2,t1]
-  ΣᵇG(t1,t2) = -2.0im * V₀^2 * GᶠG[t1,t2] * GᶜL[t2,t1]
+  ΣᶠL(t1,t2) = +1.0im * V₀^2 * GᵇL[t1,t2] * GᶜL(times[t1] - times[t2])#GᶜL[t1,t2]
+  ΣᶠG(t1,t2) = +1.0im * V₀^2 * GᵇG[t1,t2] * GᶜG(times[t1] - times[t2])#GᶜG[t1,t2]
+  ΣᵇL(t1,t2) = -2.0im * V₀^2 * GᶠL[t1,t2] * GᶜG(times[t2] - times[t1])#GᶜG[t2,t1]
+  ΣᵇG(t1,t2) = -2.0im * V₀^2 * GᶠG[t1,t2] * GᶜL(times[t2] - times[t1])#GᶜL[t2,t1]
 
   # real-time collision integral. NOTE: @assert t1 >= t2
   ∫dt(i,j,A,B) = sign(j-i) * integrate(times[min(i,j):max(i,j)], 
@@ -151,10 +153,10 @@ function f_diag_time(model::PhotonAssitedModel,data::ProblemData,times,t1)
   @unpack GᶜL,GᶜG,GᶠL,GᶠG,GᵇL,GᵇG = data
   @unpack ω₀,λ,γ,V₀ = model
 
-  ΣᶠL(t1,t2) = +1.0im * V₀^2 * GᵇL[t1,t2] * GᶜL[t1,t2]
-  ΣᶠG(t1,t2) = +1.0im * V₀^2 * GᵇG[t1,t2] * GᶜG[t1,t2]
-  ΣᵇL(t1,t2) = -2.0im * V₀^2 * GᶠL[t1,t2] * GᶜG[t2,t1]
-  ΣᵇG(t1,t2) = -2.0im * V₀^2 * GᶠG[t1,t2] * GᶜL[t2,t1]
+  ΣᶠL(t1,t2) = +1.0im * V₀^2 * GᵇL[t1,t2] * GᶜL(times[t1] - times[t2])#GᶜL[t1,t2]
+  ΣᶠG(t1,t2) = +1.0im * V₀^2 * GᵇG[t1,t2] * GᶜG(times[t1] - times[t2])#GᶜG[t1,t2]
+  ΣᵇL(t1,t2) = -2.0im * V₀^2 * GᶠL[t1,t2] * GᶜG(times[t2] - times[t1])#GᶜG[t2,t1]
+  ΣᵇG(t1,t2) = -2.0im * V₀^2 * GᶠG[t1,t2] * GᶜL(times[t2] - times[t1])#GᶜL[t2,t1]
 
   # real-time collision integral
   ∫dt(A::GreenFunction,B::Function) = integrate(times[1:t1], [A[t1,t] * B(t,t1) for t=1:t1], Trapezoidal())

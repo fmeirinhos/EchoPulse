@@ -4,16 +4,15 @@
 using Markdown
 using InteractiveUtils
 
-# ╔═╡ a3f2e1bc-1eae-11eb-31d8-2b565c9a452e
-using Revise
-
 # ╔═╡ f6eb14a0-1d04-11eb-21ab-5fe40ebb915d
 begin
+	using Revise
 	using SpecialFunctions: erf, erfc
 	using LinearAlgebra: diag, diagind, norm
 	using Test
 	using Parameters
-	using Plots, LaTeXStrings
+	using Plots; Plots.plotly()
+	using LaTeXStrings
 end
 
 # ╔═╡ 13bb1f84-1d06-11eb-306b-5bef219f7434
@@ -31,7 +30,7 @@ model, data = let β=5e1,  # temperature
 
 	model = M.PhotonAssitedModel(
 		#= SIAM parameters =#
-		V₀=sqrt(0.5),
+		V₀=sqrt(0.1),
 		ε₀f=-0.5,
 		σ=0.2,
 
@@ -43,7 +42,7 @@ model, data = let β=5e1,  # temperature
 		λ=t->0.0#Γ * ξ(t) / sqrt(0.5 * erfc((t - tc) * Ω / sqrt(2)))
 	)
 
-	data = M.ProblemData(model, β, M.NCA.LinearMesh(-10.0, 10.0, 2^11), nᵞ)
+	data = M.ProblemData(model, β, M.NCA.LinearMesh(-8.0, 8.0, 2^10), nᵞ)
 	model, data
 end;
 
@@ -58,10 +57,10 @@ begin
 	# Diagonal step
 	f_diag(u, times, t1::Int) = (println("t: $(times[t1])"); M.f_diag_time(model, data, times, t1))
 
-	tspan = (data.ts,10.0)
+	tspan = (data.ts,50.0)
 	
 	@time sol, caches = M.kbsolve(f_vert, f_diag, u0, tspan;
-		atol=1e-6, rtol=1e-3, dtmax=1.0, dtini=1e-8)
+		atol=1e-7, rtol=1e-4, dtini=1e-3, dtmax=10.)
 	
 	# Extract info
 	@unpack GᶜL,GᶜG,GᶠL,GᶠG,GᵇL,GᵇG,ΣᶠG,ΣᵇG,ΣᶠL,ΣᵇL = data
@@ -70,21 +69,24 @@ end
 
 # ╔═╡ 82b3677a-1d06-11eb-1a41-c3a9b29e9995
 begin
-	plot(times, [imag(GᶠL[t,t]) for t in eachindex(times)], label=L"f")
-	plot!(times, [imag(-GᵇL[t,t]) for t in eachindex(times)], label=L"b")
-	plot!(twinx(), times, imag([2GᶠL[t,t] - GᵇL[t,t] for t in eachindex(times)]), line=:dot, color=:green, legend=:right, label=L"Q", ylims=(1-1e-6, 1+1e-6))
+	plot(times, [GᶠL[t,t] for t in eachindex(times)] |> imag, label=L"f")
+	plot!(times, [-GᵇL[t,t] for t in eachindex(times)] |> imag, label=L"b")
+	# plot!(twinx(), times, [2GᶠL[t,t] - GᵇL[t,t] for t in eachindex(times)] |> imag, line=:dot, color=:green, legend=:right, label=L"Q", ylims=(1-1e-6, 1+1e-6))
+	# plot!(twinx(), times[1:end-1], times[2:end] - times[1:end-1], label=L"dt", legend=:bottomright, color=:grey)
 	xlabel!(L"t")
 	ylabel!(L"n")
+	xlims!(-last(times), last(times))
 end
 
-# ╔═╡ f07d9a18-1d16-11eb-10f4-87e5112010a7
-plot(times[1:end-1], times[2:end] - times[1:end-1], label=L"dt")
+# ╔═╡ 748bc87a-3897-11eb-194a-3b1916eaadd3
+# heatmap(times, times, GᶠL.data |> imag,
+# 	xlims=(-last(times), last(times)),
+# 	ylims=(-last(times), last(times)))
 
 # ╔═╡ Cell order:
-# ╠═a3f2e1bc-1eae-11eb-31d8-2b565c9a452e
-# ╠═13bb1f84-1d06-11eb-306b-5bef219f7434
 # ╠═f6eb14a0-1d04-11eb-21ab-5fe40ebb915d
+# ╠═13bb1f84-1d06-11eb-306b-5bef219f7434
 # ╠═25249ec4-1d05-11eb-211f-17a1bb80cd03
 # ╠═f0172c84-33ea-11eb-3760-d98cfb0c7ba5
 # ╠═82b3677a-1d06-11eb-1a41-c3a9b29e9995
-# ╠═f07d9a18-1d16-11eb-10f4-87e5112010a7
+# ╠═748bc87a-3897-11eb-194a-3b1916eaadd3
