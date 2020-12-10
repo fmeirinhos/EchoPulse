@@ -9,8 +9,7 @@ begin
 	using Revise
 	using SpecialFunctions: erf, erfc
 	using LinearAlgebra: diag, diagind, norm
-	using Test
-	using Parameters
+	using Parameters: @unpack
 	using Plots; Plots.plotly()
 	using LaTeXStrings
 end
@@ -42,7 +41,7 @@ model, data = let β=5e1,  # temperature
 		λ=t->0.0#Γ * ξ(t) / sqrt(0.5 * erfc((t - tc) * Ω / sqrt(2)))
 	)
 
-	data = M.ProblemData(model, β, M.NCA.LinearMesh(-8.0, 8.0, 2^10), nᵞ)
+	data = M.ProblemData(model, β, M.NCA.LinearMesh(-20.0, 20.0, 2^11), nᵞ)
 	model, data
 end;
 
@@ -60,7 +59,7 @@ begin
 	tspan = (data.ts,50.0)
 	
 	@time sol, caches = M.kbsolve(f_vert, f_diag, u0, tspan;
-		atol=1e-7, rtol=1e-4, dtini=1e-3, dtmax=10.)
+		atol=1e-7, rtol=1e-4, dtini=1e-5, dtmax=10.)
 	
 	# Extract info
 	@unpack GᶜL,GᶜG,GᶠL,GᶠG,GᵇL,GᵇG,ΣᶠG,ΣᵇG,ΣᶠL,ΣᵇL = data

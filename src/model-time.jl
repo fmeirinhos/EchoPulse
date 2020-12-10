@@ -1,9 +1,6 @@
 using NCA, NLsolve
-using NCA.FFTW: fftfreq, ifft
-using KadanoffBaym
-using NumericalIntegration
+using KadanoffBaym, NumericalIntegration
 using Parameters: @unpack
-using Test
 using LinearAlgebra: diagind
 using Interpolations
 include("util.jl")
@@ -40,9 +37,8 @@ struct ProblemData{T,U}
 end
 
 function ProblemData(model::PhotonAssitedModel, β::Real, mesh, nᵞ::Real)
-  # Get the correlated tilde and non-tilde Green functions
-  A_, G_ = begin
-
+  # Get the tilde Green functions in frequency
+  A_ = begin
     # Equilibrium model
     nca = FreqNCA(
       model=SIAM(
@@ -60,11 +56,7 @@ function ProblemData(model::PhotonAssitedModel, β::Real, mesh, nᵞ::Real)
       imΣ′ - imΣ
     end.zero
     
-    G = 1 ./ NCA.slave_particle_inv_gf(nca, NCA.slave_particle_Σ(nca, imΣ_t))
-    Gc = complex.(NCA.kramerskronig(nca.mesh, 0.5 * nca.data.Nc, :real), 0.5 * nca.data.Nc) .* nca.data.fermi⁻
-
-    # Get observables
-    hcat(2NCA.slave_particle_imG(nca, imΣ_t), nca.data.Nc) ./ (2pi), hcat(G, Gc) ./ pi
+    hcat(2NCA.slave_particle_imG(nca, imΣ_t), nca.data.Nc) ./ (2pi)
   end
 
   # Update gauge chem potential
@@ -74,18 +66,15 @@ function ProblemData(model::PhotonAssitedModel, β::Real, mesh, nᵞ::Real)
   
   # The symmetry condition L/G(τ) = -L/G(-τ)* ⟹ L/G(ω) is purely imaginary
   L = mapslices(A_, dims=1) do x
-    im_ = x .* nca.data.fermi
-    ft(nca.mesh, 1.0im * im_; mode=-1)[2]
+    ft(nca.mesh, 1.0im * x .* nca.data.fermi; mode=-1)[2]
   end
   G = mapslices(A_, dims=1) do x
-    im_ = x .* nca.data.fermi⁻
-    ft(nca.mesh, 1.0im * im_; mode=-1)[2]
+    ft(nca.mesh, 1.0im * x .* nca.data.fermi⁻; mode=-1)[2]
   end
 
   function G∞(g; n=1)
-    Z_ = zeros(eltype(g), length(g)*n, length(g)*n)
-    
     L2 = length(g) ÷ 2
+    Z_ = zeros(eltype(g), L2*n, L2*n)
 
     Z_[diagind(Z_, 0)] .= g[L2]
 
@@ -120,7 +109,7 @@ function ProblemData(model::PhotonAssitedModel, β::Real, mesh, nᵞ::Real)
     typeof(GᶠG)(zero(GᶠG.data)),
     typeof(GᵇL)(zero(GᵇL.data)),
     typeof(GᵇG)(zero(GᵇG.data)),
-    ts .- ts[end])
+    range(0.5(ts[1]-ts[end]), stop = 0.0, length=length(ts) ÷ 2))
 
   return data
 end
@@ -129,10 +118,10 @@ function f_vert_time(model::PhotonAssitedModel,data::ProblemData,times,t1,t2)
   @unpack GᶜL,GᶜG,GᶠL,GᶠG,GᵇL,GᵇG = data #,ΣᶠL,ΣᶠG,ΣᵇL,ΣᵇG = data
   @unpack ε₀f,λ₀,σ,ω₀,δ₀,λ,γ,V₀ = model
 
-  ΣᶠL(t1,t2) = +1.0im * V₀^2 * GᵇL[t1,t2] * GᶜL(times[t1] - times[t2])#GᶜL[t1,t2]
-  ΣᶠG(t1,t2) = +1.0im * V₀^2 * GᵇG[t1,t2] * GᶜG(times[t1] - times[t2])#GᶜG[t1,t2]
-  ΣᵇL(t1,t2) = -2.0im * V₀^2 * GᶠL[t1,t2] * GᶜG(times[t2] - times[t1])#GᶜG[t2,t1]
-  ΣᵇG(t1,t2) = -2.0im * V₀^2 * GᶠG[t1,t2] * GᶜL(times[t2] - times[t1])#GᶜL[t2,t1]
+  ΣᶠL(t1,t2) = +1.0im * V₀^2 * GᵇL[t1,t2] * GᶜL(times[t1] - times[t2])
+  ΣᶠG(t1,t2) = +1.0im * V₀^2 * GᵇG[t1,t2] * GᶜG(times[t1] - times[t2])
+  ΣᵇL(t1,t2) = -2.0im * V₀^2 * GᶠL[t1,t2] * GᶜG(times[t2] - times[t1])
+  ΣᵇG(t1,t2) = -2.0im * V₀^2 * GᶠG[t1,t2] * GᶜL(times[t2] - times[t1])
 
   # real-time collision integral. NOTE: @assert t1 >= t2
   ∫dt(i,j,A,B) = sign(j-i) * integrate(times[min(i,j):max(i,j)], 
@@ -153,10 +142,10 @@ function f_diag_time(model::PhotonAssitedModel,data::ProblemData,times,t1)
   @unpack GᶜL,GᶜG,GᶠL,GᶠG,GᵇL,GᵇG = data
   @unpack ω₀,λ,γ,V₀ = model
 
-  ΣᶠL(t1,t2) = +1.0im * V₀^2 * GᵇL[t1,t2] * GᶜL(times[t1] - times[t2])#GᶜL[t1,t2]
-  ΣᶠG(t1,t2) = +1.0im * V₀^2 * GᵇG[t1,t2] * GᶜG(times[t1] - times[t2])#GᶜG[t1,t2]
-  ΣᵇL(t1,t2) = -2.0im * V₀^2 * GᶠL[t1,t2] * GᶜG(times[t2] - times[t1])#GᶜG[t2,t1]
-  ΣᵇG(t1,t2) = -2.0im * V₀^2 * GᶠG[t1,t2] * GᶜL(times[t2] - times[t1])#GᶜL[t2,t1]
+  ΣᶠL(t1,t2) = +1.0im * V₀^2 * GᵇL[t1,t2] * GᶜL(times[t1] - times[t2])
+  ΣᶠG(t1,t2) = +1.0im * V₀^2 * GᵇG[t1,t2] * GᶜG(times[t1] - times[t2])
+  ΣᵇL(t1,t2) = -2.0im * V₀^2 * GᶠL[t1,t2] * GᶜG(times[t2] - times[t1])
+  ΣᵇG(t1,t2) = -2.0im * V₀^2 * GᶠG[t1,t2] * GᶜL(times[t2] - times[t1])
 
   # real-time collision integral
   ∫dt(A::GreenFunction,B::Function) = integrate(times[1:t1], [A[t1,t] * B(t,t1) for t=1:t1], Trapezoidal())
