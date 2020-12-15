@@ -10,8 +10,9 @@ begin
 	using SpecialFunctions: erf, erfc
 	using LinearAlgebra: diag, diagind, norm
 	using Parameters: @unpack
+	using Plots; Plots.plotly()
+	using LaTeXStrings
 	using Test
-	using Plots, LaTeXStrings
 end
 
 # ╔═╡ 13bb1f84-1d06-11eb-306b-5bef219f7434
@@ -20,33 +21,33 @@ module M
 		include("../src/model.jl")
 		include("../src/util.jl")
 	end
-end
+end 
 
 # ╔═╡ 25249ec4-1d05-11eb-211f-17a1bb80cd03
-model, data = let β=5e-1,  # temperature
+model, data = let β=1e2,  # temperature
 	nᵞ = 0,  # initial photon occupation
-	tc = 20, # peak arrival time
-	Ω = 1e0, # frequency bandwitdh of the pulse
-	Γ = 10., # pump and loss strength
+	tc = 120, # peak arrival time
+	Ω = 0.2, # frequency bandwitdh of the pulse
+	Γ = 20., # pump and loss strength
 	
 	# Pulse shape
 	ξ(t) = (Ω^2 / (2π))^(1/4) * exp(-(t - tc)^2 * (Ω^2 / 4))
 
 	model = M.PhotonAssitedModel(
 		#= SIAM parameters =#
-		V₀=sqrt(0.5),
+		V₀=sqrt(0.1),
 		ε₀f=-0.5,
-		σ=0.3,
+		σ=0.2,
 
 		#= pulse parameters =#
-		Γ₀=0.0,  # light-matter coupling
-		ω₀=0.0, # photon-ground state energy
-		δ₀=1e-1, # photon artificial width
-		γ=t->0.0,#Γ * ξ(t),
-		λ=t->0.0#Γ * ξ(t) / sqrt(0.5 * erfc((t - tc) * Ω / sqrt(2)))
+		Γ₀=sqrt(0.05),  # light-matter coupling
+		ω₀=0.01, # photon-ground state energy
+		δ₀=Ω # photon artificial width
+		# γ=t->Γ * ξ(t),
+		# λ=t->Γ * ξ(t) / sqrt(0.5 * erfc((t - tc) * Ω / sqrt(2)))
 	)
 
-	data = M.ProblemData(model, β, M.NCA.LinearMesh(-15.0, 15.0, 2^14), nᵞ)
+	data = M.ProblemData(model, β, M.NCA.LinearMesh(-15.0, 15.0, 2^14), t -> 5ξ(t))
 	model, data
 end;
 
@@ -62,7 +63,7 @@ end
 # ╔═╡ 1fb01056-1d06-11eb-241f-49b9b90929dd
 begin
 	# Initial condition
-	u0 = [data.GᶜL,data.GᶜG,data.GᶠL,data.GᶠG,data.GᵇL,data.GᵇG,data.GᵞL,data.GᵞG]
+	u0 = [data.GᶠL,data.GᶠG,data.GᵇL,data.GᵇG]
 	l0 = [data.GᶜA,data.GᶠT,data.GᶠM,data.GᵇT,data.GᵇM]
 	
 	# Vertical step
@@ -83,17 +84,14 @@ begin
 	# TODO: Accumulate norms over horizontal step (don't take into account just the diagonal)
 	thermal_criteria(norms) = max(norms...) < 1e-7
 
-	tspan = (0.0,100.0)
-end
-
-# ╔═╡ 5c4e194a-1d06-11eb-02fd-49d757a246b6
-begin
-	# sol, caches = M.kbsolve(f_vert, f_diag, u0, (tspan[1], tspan[2]);
+	tspan = (0.0,200.0)
+	
+	# @time sol, caches = M.kbsolve(f_vert, f_diag, u0, tspan;
 	# 	update_time =(_,t1,t2)->M.calculate_Σ_time!(model,data,t1,t2),
-	# 	update_line =(_,t1)->M.calculate_Σ_freq!(model,data,t1),
 	# 	f_line=f_line, l0 = l0,
-	# 	stop=()->thermal_criteria(thermal_norms),
-	# 	dtini=1e-3, atol=5e-6, rtol=5e-4, dtmax=0.5)
+	# 	update_line =(_,t1)->M.calculate_Σ_freq!(model,data,t1),
+	# 	# stop=()->thermal_criteria(thermal_norms),
+	# 	dtini=1e-5, atol=1e-6, rtol=5e-4, dtmax=0.5)
 	
 	# If we don't need to evaluate the thermal collision integrals anymore
 	# if thermal_criteria(thermal_norms)
@@ -106,9 +104,9 @@ begin
 	# end
 
 	# The solver will stop when tspan[2] is reached or `stop` evaluates to `false`
-	sol, caches = M.kbsolve(f_vert, f_diag, u0, tspan;
-	    update_time =(_,t1,t2)->M.calculate_Σ_time!(model,data,t1,t2),
-		atol=1e-6, rtol=1e-4, dtmax=1.0)
+	@time sol, caches = M.kbsolve(f_vert, f_diag, u0, tspan;
+		atol=1e-6, rtol=1e-3, dtini=1e-8, dtmax=10.,
+		update_time =(t,t1,t2)->M.calculate_Σ_time!(model,data,t,t1,t2))
 	
 	# Extract info
 	@unpack GᶜL,GᶜG,GᶠL,GᶠG,GᵇL,GᵇG,GᵞL,GᵞG,ΣᶠG,ΣᵇG,ΣᶠL,ΣᵇL = data
@@ -118,25 +116,21 @@ end
 
 # ╔═╡ 82b3677a-1d06-11eb-1a41-c3a9b29e9995
 begin
-	plot(times, [imag(GᶠL[t,t]) for t in eachindex(times)], label=L"f")
-	plot!(times, [imag(-GᵇL[t,t]) for t in eachindex(times)], label=L"b")
-	# plot!(twinx(), times, imag([2GᶠL[t,t] - GᵇL[t,t] for t in eachindex(times)]), line=:dot, color=:green, legend=:right, label=L"Q")#, ylims=(1-1e-6, 1+1e-6))
-	plot!(twinx(), times[1:end-1], times[2:end] - times[1:end-1], label=L"dt", legend=:bottomright, color=:grey)
+	plot(times, GᶠL.data |> imag ∘ diag, label=L"n_f")
+	plot!(times, -GᵇL.data |> imag ∘ diag, label=L"n_b")
+	plot!(times, [-GᵞL(t,t) for t in times] |> imag, 
+		label=L"n_\gamma", xlabel=L"t", color=:green, line=:dot)
+	plot!(times, (2GᶠL.data - GᵇL.data) |> imag ∘ diag, 
+		line=:dot, color=:grey, legend=:right, label=L"Q")
+	
 	xlabel!(L"t")
 	ylabel!(L"n")
 end
 
-# ╔═╡ 307b9eca-361b-11eb-3aff-99453f2940ea
-# begin
-# 	plot(times, GᵞL.data |> ((-) ∘ diag ∘ imag), label="Lesser", xlabel=L"t")
-# 	plot!(times, GᵞG.data |> ((-) ∘ diag ∘ imag), label="Greater")
-# 	# plot!(twinx(), times, ξ.(times), color=:green, legend=:right, label="Pulse", line=:dot)
-# end
-
 # ╔═╡ aede18f0-360f-11eb-182f-0fbb1762f733
 # Comparison of frequency solution with time solution
 begin
-	ts = M.ft(mesh, zero(mesh.mesh), mode=-1)
+	ts = M.ft(mesh, zero(mesh.mesh), mode=-1)[1]
 	
 	x = hcat(data.GᵇT[1], data.GᶠT[1], data.GᶜA[1]) ./ (2pi)
 	L = mapslices(x -> M.ft(mesh, x .* data.fermi, mode=-1)[2], x, dims=1) # Lesser
@@ -144,23 +138,23 @@ begin
 	
 	τs = sol.t - reverse(sol.t)
 	
-	# plot(ts, L[:,1] |> imag, label="G_b Lesser equi")
-	# plot!(τs, -diag(reverse(GᵇL.data, dims=2)) |> imag, label="G_b Lesser time")
+	# plot(ts, -L[:,1] |> imag, label="G_b Lesser equi")
+	# plot!(τs, diag(reverse(GᵇL.data, dims=2)) |> imag, label="G_b Lesser time")
 	
-	# plot(ts, G[:,1] |> imag, label="G_b Greater equi")
-	# plot!(τs, -diag(reverse(GᵇG.data, dims=2)) |> imag, label="G_b Greater time")
+	# plot(ts, -G[:,1] |> imag, label="G_b Greater equi")
+	# plot!(τs, diag(reverse(GᵇG.data, dims=2)) |> imag, label="G_b Greater time")
 	
 	# plot(ts, L[:,2] .|> imag, label="G_f Lesser equi")
 	# plot!(τs, diag(reverse(GᶠL.data, dims=2)) |> imag, label="G_f Lesser time")
 	
-	# plot(ts, G[:,2] |> imag, label="G_f Greater equi")
-	# plot!(τs, -diag(reverse(GᶠG.data, dims=2)) |> imag, label="G_f Greater time")
+	# plot(ts, -G[:,2] |> imag, label="G_f Greater equi")
+	# plot!(τs, diag(reverse(GᶠG.data, dims=2)) |> imag, label="G_f Greater time")
 	
 	# plot(ts, L[:,3] |> imag, label="G_c Lesser equi")
-	# plot!(τs, diag(reverse(GᶜL.data, dims=2)) |> imag, label="G_c Lesser time")
+	# plot!(τs, GᶜL.(τs) |> imag, label="G_c Lesser time")
 	
-	# plot(ts, G[:,3] |> imag, label="G_c Greater equi")
-	# plot!(τs, -diag(reverse(GᶜG.data, dims=2)) |> imag, label="G_c Greater time")
+	# plot(ts, -G[:,3] |> real, label="G_c Greater equi")
+	# plot!(τs, GᶜG.(τs) |> real, label="G_c Greater time")
 	
 	# plot(ts, -M.ft(mesh, data.fermi⁻ .* data.ΣᵇT[1] / (2pi))[2] |> imag)
 	# plot!(τs, -2.0im * model.V₀^2 * diag(reverse(GᶠG.data, dims=2)) .* diag(reverse(-GᶜL.data', dims=2)) .|> imag)
@@ -222,7 +216,7 @@ end
 @testset "KMS boundary conditions" begin
 	# G^R(t,t) = -i
 	# @test all(diag(GᶜG.data - GᶜL.data) .≈ -1.0im)
-	@test all(diag(GᵞG.data - GᵞL.data) .≈ -1.0im)
+	# @test all(diag(GᵞG.data - GᵞL.data) .≈ -1.0im)
 	@test all(diag(GᶠG.data) .≈ -1.0im)
 	@test all(diag(GᵇG.data) .≈ -1.0im)
 	

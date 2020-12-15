@@ -128,12 +128,12 @@ function f_vert_time(model::PhotonAssitedModel,data::ProblemData,times,t1,t2)
     [A(t1,t) * B[t,t2] for t=min(i,j):max(i,j)], Trapezoidal())
   
   # pseudo fermion
-  dGᶠL = -1.0im * ((ε₀f - λ₀) * GᶠL[t1,t2] + ∫dt(1,t1,ΣᶠG,GᶠL) - ∫dt(1,t2,ΣᶠL,GᶠG))
-  dGᶠG = -1.0im * ((ε₀f - λ₀) * GᶠG[t1,t2] + ∫dt(t2,t1,ΣᶠG,GᶠG))
+  dGᶠL = -1.0im * ((ε₀f + λ₀) * GᶠL[t1,t2] + ∫dt(1,t1,ΣᶠG,GᶠL) - ∫dt(1,t2,ΣᶠL,GᶠG))
+  dGᶠG = -1.0im * ((ε₀f + λ₀) * GᶠG[t1,t2] + ∫dt(t2,t1,ΣᶠG,GᶠG))
   
   # slave boson
-  dGᵇL = -1.0im * (-λ₀ * GᵇL[t1,t2] + ∫dt(1,t1,ΣᵇG,GᵇL) - ∫dt(1,t2,ΣᵇL,GᵇG))
-  dGᵇG = -1.0im * (-λ₀ * GᵇG[t1,t2] + ∫dt(t2,t1,ΣᵇG,GᵇG))
+  dGᵇL = -1.0im * (λ₀ * GᵇL[t1,t2] + ∫dt(1,t1,ΣᵇG,GᵇL) - ∫dt(1,t2,ΣᵇL,GᵇG))
+  dGᵇG = -1.0im * (λ₀ * GᵇG[t1,t2] + ∫dt(t2,t1,ΣᵇG,GᵇG))
   
   return [dGᶠL, dGᶠG, dGᵇL, dGᵇG]
 end

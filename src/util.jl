@@ -10,7 +10,7 @@ function ft(xs, ys; mode=+1)
   ℯⁱᵠ = dx * exp.(mode * 1.0im * xs[1] .* x̂s) * (mode == 1 ? 1 : length(xs))
 
   return x̂s[is], (ℯⁱᵠ .* (mode == 1 ? fft(ys) : ifft(ys)))[is]
-  end
+end
 
 struct ReflectedGreaterLesser{T}
   parent::T

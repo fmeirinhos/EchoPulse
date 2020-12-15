@@ -1,8 +1,9 @@
 using NCA, NLsolve
-using KadanoffBaym, ElasticArrays
-using NumericalIntegration
+using KadanoffBaym, NumericalIntegration, ElasticArrays
+using Interpolations
 using Parameters: @unpack
 using Test
+include("util.jl")
 
 Base.@kwdef mutable struct PhotonAssitedModel
   # single impurity Anderson model parameters
@@ -20,14 +21,14 @@ Base.@kwdef mutable struct PhotonAssitedModel
 end
 
 struct ProblemData{T,U}
-  GᶜL::GreenFunction{T, Array{T,2}, Lesser}
-  GᶜG::GreenFunction{T, Array{T,2}, Greater}
+  GᶜL#::GreenFunction{T, Array{T,2}, Lesser}
+  GᶜG#::GreenFunction{T, Array{T,2}, Greater}
   GᶠL::GreenFunction{T, Array{T,2}, Lesser}
   GᶠG::GreenFunction{T, Array{T,2}, Greater}
   GᵇL::GreenFunction{T, Array{T,2}, Lesser}
   GᵇG::GreenFunction{T, Array{T,2}, Greater}
-  GᵞL::GreenFunction{T, Array{T,2}, Lesser}
-  GᵞG::GreenFunction{T, Array{T,2}, Greater}
+  GᵞL#::GreenFunction{T, Array{T,2}, Lesser}
+  GᵞG#::GreenFunction{T, Array{T,2}, Greater}
   
   ΣᶠL::GreenFunction{T, Array{T,2}, Lesser}
   ΣᶠG::GreenFunction{T, Array{T,2}, Greater}
@@ -51,7 +52,7 @@ struct ProblemData{T,U}
   th½::Vector{U}
 end
 
-function ProblemData(model::PhotonAssitedModel, β::Real, mesh, nᵞ::Real)
+function ProblemData(model::PhotonAssitedModel, β::Real, mesh, nᵞ)
   # Get the correlated tilde and non-tilde Green functions
   imG_t, G = begin
 
@@ -87,8 +88,10 @@ function ProblemData(model::PhotonAssitedModel, β::Real, mesh, nᵞ::Real)
 
   @unpack fermi,fermi⁻,th½, Nc = nca.data
 
-  GᶜL = GreenFunction(ones(1,1) * (+1.0im * ∫dω(fermi .* Nc)), Lesser)
-  GᶜG = GreenFunction(ones(1,1) * (-1.0im * ∫dω(fermi⁻ .* Nc)), Greater)
+  ts, L_ = ft(nca.mesh, 1.0im/(2pi) * Nc .* fermi, mode=-1)
+  ts, G_ = ft(nca.mesh, 1.0im/(2pi) * Nc .* fermi⁻, mode=-1)
+  GᶜL = extrapolate(interpolate((ts,), +L_, Gridded(Linear())), 0)
+  GᶜG = extrapolate(interpolate((ts,), -G_, Gridded(Linear())), 0)
   GᶜA = GreenFunction(ElasticArray(hcat(1.0im * Nc)), MixedGreater)
 
   GᶠL = GreenFunction(ones(1,1) * (+1.0im * ∫dω(fermi .* 2imG_t[:,2])), Lesser)
@@ -101,8 +104,9 @@ function ProblemData(model::PhotonAssitedModel, β::Real, mesh, nᵞ::Real)
   GᵇT = GreenFunction(ElasticArray(hcat(2im * imG_t[:,1])), MixedGreater)
   GᵇM = GreenFunction(ElasticArray(hcat(G[:,1])), MixedGreater)
 
-  GᵞL = GreenFunction(ones(1,1) * (-1.0im * nᵞ), Lesser)
-  GᵞG = GreenFunction(ones(1,1) * (-1.0im * (1 + nᵞ)), Greater)
+  g(t,t′) = exp(-1.0im * (t-t′) * (model.ω₀ - 1.0im * sign(t-t′) * model.δ₀)) * nᵞ((t+t′)/2)
+  GᵞL(t,t′) = -1.0im * g(t,t′)
+  GᵞG(t,t′) = -1.0im * (1 + g(t,t′))
 
   # Spectral report
   println("\nEquilibrium spectral function normalizations:")
@@ -125,7 +129,7 @@ function ProblemData(model::PhotonAssitedModel, β::Real, mesh, nᵞ::Real)
     mesh,fermi,fermi⁻,th½)
 
   @testset "Σ equivalence between mixed and equilibrium formulations" begin
-    calculate_Σ_time!(model, data, 1, 1)
+    calculate_Σ_time!(model, data, [0.0], 1, 1)
     calculate_Σ_freq!(model, data, 1)
     @test data.ΣᵇT[1] ≈ +2im * imΣ_t[:,1]
     @test data.ΣᵇM[1] |> imag ≈ imΣ_t[:,1] .* fermi⁻
@@ -139,16 +143,12 @@ function ProblemData(model::PhotonAssitedModel, β::Real, mesh, nᵞ::Real)
 end
 
 function f_vert_time(model::PhotonAssitedModel,data::ProblemData,times,t1,t2)
-  @unpack GᶜL,GᶜG,GᶠL,GᶠG,GᵇL,GᵇG,GᵞL,GᵞG,ΣᶠL,ΣᶠG,ΣᵇL,ΣᵇG = data
-  @unpack ε₀f,λ₀,σ,ω₀,δ₀,λ,γ = model
+  @unpack GᶠL,GᶠG,GᵇL,GᵇG,ΣᶠL,ΣᶠG,ΣᵇL,ΣᵇG = data
+  @unpack ε₀f,λ₀ = model
 
   # real-time collision integral. NOTE: @assert t1 >= t2
   ∫dt(i,j,A,B) = sign(j-i) * integrate(times[min(i,j):max(i,j)], 
     [A[t1,t] * B[t,t2] for t=min(i,j):max(i,j)], TrapezoidalFast())
-
-  # conduction electron
-  dGᶜL = -1.0im * (-0.0 * GᶜL[t1,t2] - 1.0im * σ * GᶜL[t1,t2])
-  dGᶜG = -1.0im * (-0.0 * GᶜG[t1,t2] - 1.0im * σ * GᶜG[t1,t2])
   
   # pseudo fermion
   dGᶠL = -1.0im * ((ε₀f + λ₀) * GᶠL[t1,t2] + ∫dt(1,t1,ΣᶠG,GᶠL) - ∫dt(1,t2,ΣᶠL,GᶠG))
@@ -157,29 +157,18 @@ function f_vert_time(model::PhotonAssitedModel,data::ProblemData,times,t1,t2)
   # slave boson
   dGᵇL = -1.0im * (λ₀ * GᵇL[t1,t2] + ∫dt(1,t1,ΣᵇG,GᵇL) - ∫dt(1,t2,ΣᵇL,GᵇG))
   dGᵇG = -1.0im * (λ₀ * GᵇG[t1,t2] + ∫dt(t2,t1,ΣᵇG,GᵇG))
-
-  # thz pulse
-  dGᵞL = -0.0im * (ω₀ + 0.5im * (γ(times[t1]) - λ(times[t1])
-   - 1.0im * δ₀) * GᵞL[t1,t2])::ComplexF64
-  dGᵞG = -0.0im * (ω₀ + 0.5im * (γ(times[t1]) - λ(times[t1])
-   - 1.0im * δ₀) * GᵞG[t1,t2])::ComplexF64
   
-  return [dGᶜL, dGᶜG, dGᶠL, dGᶠG, dGᵇL, dGᵇG, dGᵞL, dGᵞG]
+  return [dGᶠL, dGᶠG, dGᵇL, dGᵇG]
 end
 
 function f_diag_time(model::PhotonAssitedModel,data::ProblemData,times,t1)
-  @unpack GᶜL,GᶜG,GᶠL,GᶠG,GᵇL,GᵇG,GᵞL,GᵞG,ΣᶠL,ΣᶠG,ΣᵇL,ΣᵇG = data
-  @unpack ω₀,λ,γ = model
+  @unpack GᶠL,GᶠG,GᵇL,GᵇG,ΣᶠL,ΣᶠG,ΣᵇL,ΣᵇG = data
 
   # real-time collision integral
-  ∫dt(A,B) = integrate(times[1:t1], [A[t1,t] * B[t,t1] for t=1:t1], TrapezoidalFast())
+  ∫dt(A,B) = integrate(times[1:t1], [A[t1,t] * B[t,t1] for t=1:t1], Trapezoidal())
 
   # commutator
   ⋊(a,b) = a * b - b * adjoint(a)
-
-  # conduction electron
-  dGᶜL = 0.0
-  dGᶜG = 0.0
 
   # pseudo fermion
   dGᶠL = -1.0im * (∫dt(ΣᶠG,GᶠL) - ∫dt(ΣᶠL,GᶠG) + ∫dt(GᶠL,ΣᶠG) - ∫dt(GᶠG,ΣᶠL))
@@ -189,14 +178,7 @@ function f_diag_time(model::PhotonAssitedModel,data::ProblemData,times,t1)
   dGᵇL = -1.0im * (∫dt(ΣᵇG,GᵇL) - ∫dt(ΣᵇL,GᵇG) + ∫dt(GᵇL,ΣᵇG) - ∫dt(GᵇG,ΣᵇL))
   dGᵇG = 0.0
   
-  # thz pulse
-  dGᵞL = -0.0im * ((ω₀ - 0.5im * (γ(times[t1]) + λ(times[t1]))) ⋊ GᵞL[t1,t1] 
-    + 1.0im * γ(times[t1]) * (GᵞL[t1,t1] + GᵞG[t1,t1]))::ComplexF64
-  dGᵞG = -0.0im * ((ω₀ - 0.5im * (γ(times[t1]) + λ(times[t1]))) ⋊ GᵞG[t1,t1] 
-    + 1.0im * λ(times[t1]) * (GᵞG[t1,t1] - GᵞL[t1,t1]) 
-    + 2.0im * γ(times[t1]) * GᵞG[t1,t1])::ComplexF64
-  
-  return [dGᶜL, dGᶜG, dGᶠL, dGᶠG, dGᵇL, dGᵇG, dGᵞL, dGᵞG]
+  return [dGᶠL, dGᶠG, dGᵇL, dGᵇG]
 end
 
 function f_vert_freq(model::PhotonAssitedModel,data::ProblemData,times,t1,t2)
@@ -204,10 +186,6 @@ function f_vert_freq(model::PhotonAssitedModel,data::ProblemData,times,t1,t2)
 
   # real-frequency collision integral
   ∫dω(f) = integrate(mesh.mesh, fermi .* f, TrapezoidalEvenFast()) / (2π)
-
-  # conduction electron
-  dGᶜL = 0.0
-  dGᶜG = 0.0
   
   # pseudo fermion
   dGᶠL = -1.0im * (
@@ -219,10 +197,7 @@ function f_vert_freq(model::PhotonAssitedModel,data::ProblemData,times,t1,t2)
     -∫dω(conj(ΣᵇM[t1]) .* GᵇT[t2] - conj(ΣᵇT[t1]) .* GᵇM[t2]))
   dGᵇG = 0.0
   
-  # thz pulse
-  dGᵞL = 0.0
-  dGᵞG = 0.0
-  return [dGᶜL, dGᶜG, dGᶠL, dGᶠG, dGᵇL, dGᵇG, dGᵞL, dGᵞG]
+  return [dGᶠL, dGᶠG, dGᵇL, dGᵇG]
 end
 
 function f_diag_freq(model::PhotonAssitedModel,data::ProblemData,times,t1)
@@ -230,10 +205,6 @@ function f_diag_freq(model::PhotonAssitedModel,data::ProblemData,times,t1)
 
   # real-frequency collision integral
   ∫dω(f) = integrate(mesh.mesh, fermi .* f, TrapezoidalEvenFast()) / (2π)
-
-  # conduction electron: thermal contributions ∝ ζ → 0
-  dGᶜL = 0.0
-  dGᶜG = 0.0
 
   # pseudo fermion
   dGᶠL = -1.0im * (
@@ -246,12 +217,8 @@ function f_diag_freq(model::PhotonAssitedModel,data::ProblemData,times,t1)
     -∫dω(conj(ΣᵇM[t1]) .* GᵇT[t1] - conj(ΣᵇT[t1]) .* GᵇM[t1])
     +∫dω(conj(GᵇM[t1]) .* ΣᵇT[t1] - conj(GᵇT[t1]) .* ΣᵇM[t1]))
   dGᵇG = 0.0
-  
-  # thz pulse: no thermal contributions
-  dGᵞL = 0.0
-  dGᵞG = 0.0
 
-  return [dGᶜL, dGᶜG, dGᶠL, dGᶠG, dGᵇL, dGᵇG, dGᵞL, dGᵞG]
+  return [dGᶠL, dGᶠG, dGᵇL, dGᵇG]
 end
 
 function f_line_freq(model::PhotonAssitedModel,data::ProblemData,times,t1)
@@ -260,7 +227,7 @@ function f_line_freq(model::PhotonAssitedModel,data::ProblemData,times,t1)
   @unpack ε₀f,λ₀,σ = model
 
   # real-time collision integral
-  ∫dt(A,B) = integrate(times, [-A[t] .* B[t1,t]' for t=1:t1], TrapezoidalFast())
+  ∫dt(A,B) = integrate(times, [A[t] .* B[t,t1] for t=1:t1], TrapezoidalFast())
   
   # conduction electron
   dGᶜA = +1.0im * (+1.0im .* σ .* GᶜA[t1])
@@ -276,23 +243,23 @@ function f_line_freq(model::PhotonAssitedModel,data::ProblemData,times,t1)
   return [dGᶜA, dGᶠT, dGᶠM, dGᵇT, dGᵇM]
 end
 
-function calculate_Σ_time!(model::PhotonAssitedModel,data::ProblemData,t1,t2)
+function calculate_Σ_time!(model::PhotonAssitedModel,data::ProblemData,times,t1,t2)
   @unpack GᶜL,GᶜG,GᶠL,GᶠG,GᵇL,GᵇG,GᵞL,GᵞG,ΣᶠL,ΣᶠG,ΣᵇL,ΣᵇG = data
   @unpack V₀,Γ₀ = model
   
-  if (n = size(GᶜL,2)) > size(ΣᶠL,2)
+  if (n = size(GᶠL,2)) > size(ΣᶠL,2)
     resize!(ΣᶠL,n)
     resize!(ΣᶠG,n)
     resize!(ΣᵇL,n)
     resize!(ΣᵇG,n)
   end
 
-  V² = V₀^2 + 1.0im * Γ₀^2 * (GᵞL[t1,t2] + GᵞG[t1,t2])
+  V² = V₀^2 + 1.0im * Γ₀^2 * (GᵞL(times[t1],times[t2]) + GᵞG(times[t1],times[t2]))
 
-  ΣᶠL[t1,t2] = +1.0im * V² * GᵇL[t1,t2] * GᶜL[t1,t2]
-  ΣᶠG[t1,t2] = +1.0im * V² * GᵇG[t1,t2] * GᶜG[t1,t2]
-  ΣᵇL[t1,t2] = -2.0im * V² * GᶠL[t1,t2] * GᶜG[t2,t1]
-  ΣᵇG[t1,t2] = -2.0im * V² * GᶠG[t1,t2] * GᶜL[t2,t1]
+  ΣᶠL[t1,t2] = +1.0im * V² * GᵇL[t1,t2] * GᶜL(times[t1] - times[t2])
+  ΣᶠG[t1,t2] = +1.0im * V² * GᵇG[t1,t2] * GᶜG(times[t1] - times[t2])
+  ΣᵇL[t1,t2] = -2.0im * V² * GᶠL[t1,t2] * GᶜG(times[t2] - times[t1])
+  ΣᵇG[t1,t2] = -2.0im * V² * GᶠG[t1,t2] * GᶜL(times[t2] - times[t1])
 end
 
 function calculate_Σ_freq!(model::PhotonAssitedModel,data::ProblemData,t1)
@@ -300,7 +267,7 @@ function calculate_Σ_freq!(model::PhotonAssitedModel,data::ProblemData,t1)
   @unpack mesh, fermi, fermi⁻, th½ = data
   @unpack V₀ = model
   
-  if (n = size(GᶜA,2)) > size(ΣᶠT,2)
+  if (n = size(GᶠT,2)) > size(ΣᶠT,2)
     resize!(ΣᶠT,n)
     resize!(ΣᶠM,n)
     resize!(ΣᵇT,n)
