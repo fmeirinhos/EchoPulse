@@ -1,5 +1,5 @@
 ### A Pluto.jl notebook ###
-# v0.12.11
+# v0.12.18
 
 using Markdown
 using InteractiveUtils
@@ -14,6 +14,13 @@ begin
 	using LaTeXStrings
 	using Test
 end
+
+# ╔═╡ b44ab15a-4d2e-11eb-16dc-21ca8a270562
+html"""<style>
+main {
+    max-width: 1000px;
+}
+"""
 
 # ╔═╡ 13bb1f84-1d06-11eb-306b-5bef219f7434
 module M
@@ -47,7 +54,7 @@ model, data = let β=1e2,  # temperature
 		# λ=t->Γ * ξ(t) / sqrt(0.5 * erfc((t - tc) * Ω / sqrt(2)))
 	)
 
-	data = M.ProblemData(model, β, M.NCA.LinearMesh(-15.0, 15.0, 2^14), t -> 5ξ(t))
+	data = M.ProblemData(model, β, M.NCA.LinearMesh(-15.0, 15.0, 2^15), (T -> 15ξ(T), τ -> 15ξ(tc+τ)))
 	model, data
 end;
 
@@ -71,7 +78,7 @@ begin
 	f_vert(u, v, times, t1::Int, t2::Int) = f_vert(u, times, t1, t2) .+ M.f_vert_freq(model, data, times, t1, t2)
 	
 	# Diagonal step
-	f_diag(u, times, t1::Int) = (println("t: $(times[t1])"); M.f_diag_time(model, data, times, t1))
+	f_diag(u, times, t1::Int) = (println("t: $(round(times[t1]; digits=3))"); M.f_diag_time(model, data, times, t1))
 	f_diag(u, v, times, t1::Int) = f_diag(u, times, t1) .+ update_norms!(M.f_diag_freq(model, data, times, t1))
 	
 	# Vertical step for mixed functions
@@ -116,27 +123,55 @@ end
 
 # ╔═╡ 82b3677a-1d06-11eb-1a41-c3a9b29e9995
 begin
-	plot(times, GᶠL.data |> imag ∘ diag, label=L"n_f")
-	plot!(times, -GᵇL.data |> imag ∘ diag, label=L"n_b")
-	plot!(times, [-GᵞL(t,t) for t in times] |> imag, 
-		label=L"n_\gamma", xlabel=L"t", color=:green, line=:dot)
-	plot!(times, (2GᶠL.data - GᵇL.data) |> imag ∘ diag, 
-		line=:dot, color=:grey, legend=:right, label=L"Q")
+	using Interpolations
 	
-	xlabel!(L"t")
-	ylabel!(L"n")
+	times_lin = range(first(times), stop=last(times), length=length(times))
+	
+	gd_itp = interpolate((times,times), +1.0im * (GᶠG.data .* conj(GᵇL.data) - GᶠL.data .* conj(GᵇG.data)), Gridded(Linear()))
+	
+	ρ, (x_, y_) = M.wigner_transform([gd_itp(t1,t2) for t1 in times_lin, t2 in times_lin]; 
+		ts=times_lin, fourier=true)
+	
+	h1 = heatmap(y_, x_, -ρ |> real;
+		xaxis=false, ylims=(-5.0, 5.0), ylabel="ω", c=:cividis)
+	
+	# Occupations
+	p1 = plot(times, GᶠL.data |> imag ∘ diag;
+		label=L"n_f")
+	p1 = plot!(times, -GᵇL.data |> imag ∘ diag;
+		label=L"n_b")
+	p1 = plot!(times, (2GᶠL.data - GᵇL.data) |> imag ∘ diag;
+		label=L"Q", line=(:dot, :grey, 1))
+	
+	# Kondo time-scale
+	kondo_T = 1 / M.NCA.kondo_temp(data.mesh, vec(data.GᶜA.data) ./ (2pi) |> imag, model.ε₀f, model.V₀)
+	
+	# THz pulse
+	pulse = [-GᵞL(t,t) for t in times] |> imag
+	
+	p1 = plot!(twinx(), times, pulse;
+		label=L"n_\gamma", line=(:dot, :green), legend=:right, xlabel="T (t_K=$(round(kondo_T, digits=3)))")
+		
+	tK_grid = range(-1.0, 1.0, length=20) #NOTE: Needs for a centred vspan
+	
+	for t in 2:length(tK_grid)		
+		vspan!(times[findmax(pulse)[2]] .+ kondo_T .* [tK_grid[t-1], tK_grid[t]];
+			alpha=0.5ℯ^(-abs(tK_grid[t])), fillcolor=:grey, label=nothing)
+	end
+		
+	plot(h1, p1, layout = @layout [a; b])
 end
 
 # ╔═╡ aede18f0-360f-11eb-182f-0fbb1762f733
-# Comparison of frequency solution with time solution
 begin
+	# Comparison of frequency solution with time solution
 	ts = M.ft(mesh, zero(mesh.mesh), mode=-1)[1]
 	
 	x = hcat(data.GᵇT[1], data.GᶠT[1], data.GᶜA[1]) ./ (2pi)
 	L = mapslices(x -> M.ft(mesh, x .* data.fermi, mode=-1)[2], x, dims=1) # Lesser
 	G = mapslices(x -> M.ft(mesh, x .* data.fermi⁻, mode=-1)[2], x, dims=1) # Spectral
 	
-	τs = sol.t - reverse(sol.t)
+	τs = times - reverse(times)
 	
 	# plot(ts, -L[:,1] |> imag, label="G_b Lesser equi")
 	# plot!(τs, diag(reverse(GᵇL.data, dims=2)) |> imag, label="G_b Lesser time")
@@ -153,8 +188,8 @@ begin
 	# plot(ts, L[:,3] |> imag, label="G_c Lesser equi")
 	# plot!(τs, GᶜL.(τs) |> imag, label="G_c Lesser time")
 	
-	# plot(ts, -G[:,3] |> real, label="G_c Greater equi")
-	# plot!(τs, GᶜG.(τs) |> real, label="G_c Greater time")
+	# plot(ts, -G[:,3] |> imag, label="G_c Greater equi")
+	# plot!(τs, GᶜG.(τs) |> imag, label="G_c Greater time")
 	
 	# plot(ts, -M.ft(mesh, data.fermi⁻ .* data.ΣᵇT[1] / (2pi))[2] |> imag)
 	# plot!(τs, -2.0im * model.V₀^2 * diag(reverse(GᶠG.data, dims=2)) .* diag(reverse(-GᶜL.data', dims=2)) .|> imag)
@@ -168,16 +203,26 @@ begin
 	# plot(ts, -M.ft(mesh, data.fermi⁻ .* data.ΣᶠT[1] / (2pi))[2] |> imag)
 	# plot!(τs, +1.0im * model.V₀^2 * diag(reverse(GᵇG.data, dims=2)) .* diag(reverse(GᶜG.data, dims=2)) .|> imag)
 	
-	xlims!(0.25τs[1], 0.25τs[end])
-end
-
-# ╔═╡ 930b640e-3612-11eb-2cab-4f3c5bf1160c
-# Comparison of time solution with frequency solution
-begin
-	using Interpolations
+	# mesh_real = M.NCA.LinearMesh(mesh.xmin, mesh.xmax, mesh.L)
+	# imGd = 1/(8pi) * (
+	# 	+ M.NCA.xcorr(mesh_real, fermi .* imag(GᵇT[1]), fermi⁻ .* imag(GᶠT[1]))
+	# 	+ M.NCA.xcorr(mesh_real, fermi⁻ .* imag(GᵇT[1]), fermi .* imag(GᶠT[1]))
+	# 	)
 	
-	τs_ = range(τs[1], stop=τs[end], length=length(τs))
-	ωs = M.ft(τs_, zero(τs_))[1]
+	# plot(ts, M.ft(mesh_real, 1.0im * imGd; mode=-1)[2] |> imag)
+	# plot!(τs, +1.0im * diag(reverse(GᶠG.data .* conj(GᵇL.data) - GᶠL.data .* conj(GᵇG.data), dims=2)) |> imag)
+	
+	# xlims!(0.25τs[1], 0.25τs[end])
+	
+	# Comparison of time solution with frequency solution
+	# τs_lin = range(τs[1], stop=τs[end], length=length(τs))
+	# ωs = M.ft(τs_lin, zero(τs_lin))[1]
+	
+	# itp = interpolate((τs,), +1.0im * diag(reverse(GᶠG.data .* conj(GᵇL.data) - GᶠL.data .* conj(GᵇG.data), dims=2)),
+	# 	Gridded(Linear()))
+	
+	# plot(ωs, M.ft(τs_lin, itp.(τs_lin))[2] |> imag)
+	# plot!(mesh_real.mesh, 4imGd)
 	
 	# itp = interpolate((τs,), diag(reverse(GᵇL.data, dims=2)), Gridded(Linear()))
 	# plot(ωs, -M.ft(τs_, itp.(τs_))[2] |> imag)
@@ -253,6 +298,7 @@ end
 end
 
 # ╔═╡ Cell order:
+# ╠═b44ab15a-4d2e-11eb-16dc-21ca8a270562
 # ╠═f6eb14a0-1d04-11eb-21ab-5fe40ebb915d
 # ╠═13bb1f84-1d06-11eb-306b-5bef219f7434
 # ╠═25249ec4-1d05-11eb-211f-17a1bb80cd03
@@ -261,5 +307,4 @@ end
 # ╠═82b3677a-1d06-11eb-1a41-c3a9b29e9995
 # ╠═307b9eca-361b-11eb-3aff-99453f2940ea
 # ╠═aede18f0-360f-11eb-182f-0fbb1762f733
-# ╠═930b640e-3612-11eb-2cab-4f3c5bf1160c
 # ╠═19b432e6-1d14-11eb-1770-fda8ed6ad743

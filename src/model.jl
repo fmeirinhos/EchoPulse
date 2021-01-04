@@ -104,13 +104,12 @@ function ProblemData(model::PhotonAssitedModel, β::Real, mesh, nᵞ)
   GᵇT = GreenFunction(ElasticArray(hcat(2im * imG_t[:,1])), MixedGreater)
   GᵇM = GreenFunction(ElasticArray(hcat(G[:,1])), MixedGreater)
 
-  g(t,t′) = exp(-1.0im * (t-t′) * (model.ω₀ - 1.0im * sign(t-t′) * model.δ₀)) * nᵞ((t+t′)/2)
-  GᵞL(t,t′) = -1.0im * g(t,t′)
-  GᵞG(t,t′) = -1.0im * (1 + g(t,t′))
+  GᵞL(t,t′) = -1.0im * (nᵞ[1]((t+t′)/2) * nᵞ[2](t-t′)) * exp(-1.0im * (t-t′) * model.ω₀)
+  GᵞG(t,t′) = -1.0im * (nᵞ[1]((t+t′)/2) * nᵞ[2](t-t′) + 1) * exp(-1.0im * (t-t′) * model.ω₀)
 
   # Spectral report
   println("\nEquilibrium spectral function normalizations:")
-  println(" ∫dω f(ω) Aᶜ(ω) = $(imag(+GᶜL[1,1]))")
+  println(" ∫dω f(ω) Aᶜ(ω) = $(imag(+GᶜL(0.0)))")
   println(" ∫dω f(ω) Aᶠ(ω) = $(imag(+GᶠL[1,1]))")
   println(" ∫dω b(ω) Aᵇ(ω) = $(imag(-GᵇL[1,1]))")
   println(" Q = $(imag(2GᶠL[1,1] - GᵇL[1,1]))")
@@ -147,8 +146,13 @@ function f_vert_time(model::PhotonAssitedModel,data::ProblemData,times,t1,t2)
   @unpack ε₀f,λ₀ = model
 
   # real-time collision integral. NOTE: @assert t1 >= t2
-  ∫dt(i,j,A,B) = sign(j-i) * integrate(times[min(i,j):max(i,j)], 
-    [A[t1,t] * B[t,t2] for t=min(i,j):max(i,j)], TrapezoidalFast())
+  function ∫dt(i,j,A,B)
+    retval = zero(eltype(A))
+    @fastmath @simd for k in min(i,j):(max(i,j)-1)
+        @inbounds retval += (times[k+1] - times[k]) * (A[t1,k]*B[k,t2] + A[t1,k+1]*B[k+1,t2])
+    end
+    return 1//2 * sign(j-i) * retval
+  end
   
   # pseudo fermion
   dGᶠL = -1.0im * ((ε₀f + λ₀) * GᶠL[t1,t2] + ∫dt(1,t1,ΣᶠG,GᶠL) - ∫dt(1,t2,ΣᶠL,GᶠG))
@@ -165,7 +169,13 @@ function f_diag_time(model::PhotonAssitedModel,data::ProblemData,times,t1)
   @unpack GᶠL,GᶠG,GᵇL,GᵇG,ΣᶠL,ΣᶠG,ΣᵇL,ΣᵇG = data
 
   # real-time collision integral
-  ∫dt(A,B) = integrate(times[1:t1], [A[t1,t] * B[t,t1] for t=1:t1], Trapezoidal())
+  function ∫dt(A,B)
+    retval = zero(eltype(A))
+    @fastmath @simd for k in 1:(t1-1)
+        @inbounds retval += (times[k+1] - times[k]) * (A[t1,k]*B[k,t1] + A[t1,k+1]*B[k+1,t1])
+    end
+    return 1//2 * retval
+  end
 
   # commutator
   ⋊(a,b) = a * b - b * adjoint(a)
@@ -254,12 +264,13 @@ function calculate_Σ_time!(model::PhotonAssitedModel,data::ProblemData,times,t1
     resize!(ΣᵇG,n)
   end
 
-  V² = V₀^2 + 1.0im * Γ₀^2 * (GᵞL(times[t1],times[t2]) + GᵞG(times[t1],times[t2]))
+  V²L = V₀^2 + Γ₀^2 * 1.0im * (GᵞL(times[t1],times[t2]) + GᵞG(times[t2],times[t1]))
+  V²G = V₀^2 + Γ₀^2 * 1.0im * (GᵞG(times[t1],times[t2]) + GᵞL(times[t2],times[t1]))
 
-  ΣᶠL[t1,t2] = +1.0im * V² * GᵇL[t1,t2] * GᶜL(times[t1] - times[t2])
-  ΣᶠG[t1,t2] = +1.0im * V² * GᵇG[t1,t2] * GᶜG(times[t1] - times[t2])
-  ΣᵇL[t1,t2] = -2.0im * V² * GᶠL[t1,t2] * GᶜG(times[t2] - times[t1])
-  ΣᵇG[t1,t2] = -2.0im * V² * GᶠG[t1,t2] * GᶜL(times[t2] - times[t1])
+  ΣᶠL[t1,t2] = +1.0im * V²L * GᵇL[t1,t2] * GᶜL(times[t1] - times[t2])
+  ΣᶠG[t1,t2] = +1.0im * V²G * GᵇG[t1,t2] * GᶜG(times[t1] - times[t2])
+  ΣᵇL[t1,t2] = -2.0im * V²L * GᶠL[t1,t2] * GᶜG(times[t2] - times[t1])
+  ΣᵇG[t1,t2] = -2.0im * V²G * GᶠG[t1,t2] * GᶜL(times[t2] - times[t1])
 end
 
 function calculate_Σ_freq!(model::PhotonAssitedModel,data::ProblemData,t1)
