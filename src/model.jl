@@ -104,8 +104,8 @@ function ProblemData(model::PhotonAssitedModel, β::Real, mesh, nᵞ)
   GᵇT = GreenFunction(ElasticArray(hcat(2im * imG_t[:,1])), MixedGreater)
   GᵇM = GreenFunction(ElasticArray(hcat(G[:,1])), MixedGreater)
 
-  GᵞL(t,t′) = -1.0im * (nᵞ[1]((t+t′)/2) * nᵞ[2](t-t′)) * exp(-1.0im * (t-t′) * model.ω₀)
-  GᵞG(t,t′) = -1.0im * (nᵞ[1]((t+t′)/2) * nᵞ[2](t-t′) + 1) * exp(-1.0im * (t-t′) * model.ω₀)
+  GᵞL(t,t′) = -1.0im * exp(-1.0im * (t-t′) * model.ω₀) * (nᵞ[1](0.5(t+t′)) * nᵞ[2](t-t′))
+  GᵞG(t,t′) = -1.0im * exp(-1.0im * (t-t′) * model.ω₀) * (nᵞ[1](0.5(t+t′)) * nᵞ[2](t-t′) + 1)
 
   # Spectral report
   println("\nEquilibrium spectral function normalizations:")

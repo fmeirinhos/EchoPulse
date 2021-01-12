@@ -10,7 +10,7 @@ begin
 	using SpecialFunctions: erf, erfc
 	using LinearAlgebra: diag, diagind, norm
 	using Parameters: @unpack
-	using Plots; Plots.plotly()
+	using Plots; Plots.gr(); #Plots.plotly()
 	using LaTeXStrings
 	using Test
 end
@@ -60,11 +60,15 @@ end;
 
 # ╔═╡ 376c9bfc-1d05-11eb-2f4e-331c0302a14b
 begin
-	plot(data.mesh.mesh, data.GᵇT[1] |> imag, label=L"$A_b$")
-	plot!(data.mesh.mesh, data.GᶠT[1] |> imag, label=L"$A_f$")
-	plot!(data.mesh.mesh, data.GᶜA[1] |> imag, label=L"$A_c$")
-	title!("Tilde spectral functions")
-	xlabel!(L"$\omega$")
+	plot(data.mesh.mesh, data.GᵇT[1] |> imag;
+		label=L"$\tilde{A}_b$")
+	plot!(data.mesh.mesh, data.GᶠT[1] |> imag;
+		label=L"$\tilde{A}_f$", legend=:topleft)
+	plot!(twinx(), data.mesh.mesh, data.GᶜA[1] |> imag;
+		label=L"$A_c$", linecolor=:green, grid=false, legend=:topright)
+	title!(L"\textrm{Equilibrium spectral functions}")
+	xlabel!(L"$\omega/D$")
+	# savefig("equilibrium-spectra.pdf")
 end
 
 # ╔═╡ 1fb01056-1d06-11eb-241f-49b9b90929dd
@@ -133,7 +137,11 @@ begin
 		ts=times_lin, fourier=true)
 	
 	h1 = heatmap(y_, x_, -ρ |> real;
-		xaxis=false, ylims=(-5.0, 5.0), ylabel="ω", c=:cividis)
+		xaxis=nothing, ylabel=L"\omega / D", ylims=(-2.5, 2.5), legend=:none, c=:magma)
+	
+	colorbar = scatter([0,0], [1,1], zcolor=[0,1];
+		xaxis=nothing, xlims=(1,1), yaxis=nothing, label=nothing, grid=nothing, 
+		c=:magma, clims=extrema(-ρ |> real))
 	
 	# Occupations
 	p1 = plot(times, GᶠL.data |> imag ∘ diag;
@@ -141,7 +149,7 @@ begin
 	p1 = plot!(times, -GᵇL.data |> imag ∘ diag;
 		label=L"n_b")
 	p1 = plot!(times, (2GᶠL.data - GᵇL.data) |> imag ∘ diag;
-		label=L"Q", line=(:dot, :grey, 1))
+		label=L"Q", line=(:dot, :grey, 1), legend=:topleft, xlims=extrema(times))
 	
 	# Kondo time-scale
 	kondo_T = 1 / M.NCA.kondo_temp(data.mesh, vec(data.GᶜA.data) ./ (2pi) |> imag, model.ε₀f, model.V₀)
@@ -150,112 +158,100 @@ begin
 	pulse = [-GᵞL(t,t) for t in times] |> imag
 	
 	p1 = plot!(twinx(), times, pulse;
-		label=L"n_\gamma", line=(:dot, :green), legend=:right, xlabel="T (t_K=$(round(kondo_T, digits=3)))")
+		label=L"n_\gamma", line=(:dot, :green), legend=:topright,
+		xlabel=L"T\;D \quad(T_K\;D=%$(round(kondo_T, digits=3)))", xlims=extrema(times), grid=false)
 		
-	tK_grid = range(-1.0, 1.0, length=20) #NOTE: Needs for a centred vspan
+	tK_grid = range(-1.0, 1.0, length=2) #NOTE: Needs an even number for a centred vspan
 	
 	for t in 2:length(tK_grid)		
 		vspan!(times[findmax(pulse)[2]] .+ kondo_T .* [tK_grid[t-1], tK_grid[t]];
-			alpha=0.5ℯ^(-abs(tK_grid[t])), fillcolor=:grey, label=nothing)
+			alpha=0.5ℯ^(-abs(tK_grid[t])), fillcolor=:grey,
+			linealpha=0.5ℯ^(-abs(tK_grid[t])), linecolor=:grey,
+			markersize=0,
+			label=nothing)
 	end
-		
-	plot(h1, p1, layout = @layout [a; b])
+	
+	plot(h1, p1, colorbar, layout = @layout [grid(2, 1) a{0.05w}])
+	# savefig("ad_wigner.pdf")
 end
 
 # ╔═╡ aede18f0-360f-11eb-182f-0fbb1762f733
-begin
-	# Comparison of frequency solution with time solution
-	ts = M.ft(mesh, zero(mesh.mesh), mode=-1)[1]
+# # Comparison of frequency solution with time solution
+# begin
+# 	ts = M.ft(mesh, zero(mesh.mesh), mode=-1)[1]
 	
-	x = hcat(data.GᵇT[1], data.GᶠT[1], data.GᶜA[1]) ./ (2pi)
-	L = mapslices(x -> M.ft(mesh, x .* data.fermi, mode=-1)[2], x, dims=1) # Lesser
-	G = mapslices(x -> M.ft(mesh, x .* data.fermi⁻, mode=-1)[2], x, dims=1) # Spectral
+# 	x = hcat(data.GᵇT[1], data.GᶠT[1], data.GᶜA[1]) ./ (2pi)
+# 	L = mapslices(x -> M.ft(mesh, x .* data.fermi, mode=-1)[2], x, dims=1) # Lesser
+# 	G = mapslices(x -> M.ft(mesh, x .* data.fermi⁻, mode=-1)[2], x, dims=1) # Spectral
 	
-	τs = times - reverse(times)
+# 	τs = times - reverse(times)
 	
-	# plot(ts, -L[:,1] |> imag, label="G_b Lesser equi")
-	# plot!(τs, diag(reverse(GᵇL.data, dims=2)) |> imag, label="G_b Lesser time")
+# 	GbLτ = plot(ts, -L[:,1] |> imag;
+# 		label=L"\mathcal{F}_\omega\{G^<_b\}(\tau)", legend=:bottomright, xlims=(0.25τs[1], 0.25τs[end]), xlabel=L"\tau D")
+# 	GbLτ = plot!(τs, diag(reverse(GᵇL.data, dims=2)) |> imag;
+# 		label=L"G^<_b(\tau)")
 	
-	# plot(ts, -G[:,1] |> imag, label="G_b Greater equi")
-	# plot!(τs, diag(reverse(GᵇG.data, dims=2)) |> imag, label="G_b Greater time")
+# 	GbGτ = plot(ts, -G[:,1] |> imag;
+# 		label=L"\mathcal{F}_\omega\{G^>_b\}(\tau)", legend=:bottomright, xlims=(0.25τs[1], 0.25τs[end]), xlabel=L"\tau D")
+# 	GbGτ = plot!(τs, diag(reverse(GᵇG.data, dims=2)) |> imag;
+# 		label=L"G^>_b(\tau)")
 	
-	# plot(ts, L[:,2] .|> imag, label="G_f Lesser equi")
-	# plot!(τs, diag(reverse(GᶠL.data, dims=2)) |> imag, label="G_f Lesser time")
+# 	GfLτ = plot(ts, L[:,2] .|> imag;
+# 		label=L"\mathcal{F}_\omega\{G^<_f\}(\tau)", legend=:bottomright, xlims=(0.25τs[1], 0.25τs[end]), xlabel=L"\tau D")
+# 	GfLτ = plot!(τs, diag(reverse(GᶠL.data, dims=2)) |> imag;
+# 		label=L"G^<_f(\tau)")
 	
-	# plot(ts, -G[:,2] |> imag, label="G_f Greater equi")
-	# plot!(τs, diag(reverse(GᶠG.data, dims=2)) |> imag, label="G_f Greater time")
+# 	GfGτ = plot(ts, -G[:,2] |> imag;
+# 		label=L"\mathcal{F}_\omega\{G^>_f\}(\tau)", legend=:bottomright, xlims=(0.25τs[1], 0.25τs[end]), xlabel=L"\tau D")
+# 	GfGτ = plot!(τs, diag(reverse(GᶠG.data, dims=2)) |> imag;
+# 		label=L"G^>_f(\tau)")
 	
-	# plot(ts, L[:,3] |> imag, label="G_c Lesser equi")
-	# plot!(τs, GᶜL.(τs) |> imag, label="G_c Lesser time")
+# 	GcLτ = plot(ts, L[:,3] |> imag;
+# 		label=L"\mathcal{F}_\omega\{G^<_c\}(\tau)", legend=:bottomright, xlims=(0.25τs[1], 0.25τs[end]), xlabel=L"\tau D")
+# 	GcLτ = plot!(τs, GᶜL.(τs) |> imag;
+# 		label=L"G^<_c(\tau)")
 	
-	# plot(ts, -G[:,3] |> imag, label="G_c Greater equi")
-	# plot!(τs, GᶜG.(τs) |> imag, label="G_c Greater time")
+# 	GcGτ = plot(ts, -G[:,3] |> imag;
+# 		label=L"\mathcal{F}_\omega\{G^>_c\}(\tau)", legend=:bottomright, xlims=(0.25τs[1], 0.25τs[end]), xlabel=L"\tau D")
+# 	GcGτ = plot!(τs, GᶜG.(τs) |> imag;
+# 		label=L"G^>_c(\tau)")
+		
+# 	plot(GbLτ, GbGτ, GfLτ, GfGτ, GcLτ, GcGτ, layout = @layout [a b; c d; e f])
+# 	# savefig("equilibrium-comparison1.pdf")
+# end
+
+# ╔═╡ 21e84c2a-5407-11eb-3bbf-6590b0ca21eb
+# begin
+# 	mesh_real = M.NCA.LinearMesh(mesh.xmin, mesh.xmax, mesh.L)
+# 	imGd = 1/(2pi) * (
+# 		+ M.NCA.xcorr(mesh_real, fermi .* imag(GᵇT[1]), fermi⁻ .* imag(GᶠT[1]))
+# 		+ M.NCA.xcorr(mesh_real, fermi⁻ .* imag(GᵇT[1]), fermi .* imag(GᶠT[1]))
+# 		)
 	
-	# plot(ts, -M.ft(mesh, data.fermi⁻ .* data.ΣᵇT[1] / (2pi))[2] |> imag)
-	# plot!(τs, -2.0im * model.V₀^2 * diag(reverse(GᶠG.data, dims=2)) .* diag(reverse(-GᶜL.data', dims=2)) .|> imag)
+# 	Gd_τ = plot(ts, 1/(2pi) * M.ft(mesh_real, 1.0im * imGd; mode=-1)[2] |> imag;
+# 		label=L"\mathcal{F}^{-1}_\omega\{A_d(\omega)\}(\tau)", 
+# 		xlabel=L"\tau \;D", xlims=(0.25τs[1], 0.25τs[end]), 
+# 		legend=:topright)
+# 	Gd_τ = plot!(τs, 1im * diag(reverse(GᶠG.data .* conj(GᵇL.data) - GᶠL.data .* conj(GᵇG.data), dims=2)) |> imag;
+# 		label=L"A_d(\tau)")
 	
-	# plot(ts, -M.ft(mesh, data.fermi .* data.ΣᵇT[1] / (2pi))[2] |> imag)
-	# plot!(τs, -2.0im * model.V₀^2 * diag(reverse(GᶠL.data, dims=2)) .* diag(reverse(-GᶜG.data', dims=2)) .|> imag)
+# 	τs_lin = range(τs[1], stop=τs[end], length=length(τs))
+# 	ωs = M.ft(τs_lin, zero(τs_lin))[1]
 	
-	# plot(ts, M.ft(mesh, data.fermi .* data.ΣᶠT[1] / (2pi))[2] |> imag)
-	# plot!(τs, +1.0im * model.V₀^2 * diag(reverse(GᵇL.data, dims=2)) .* diag(reverse(GᶜL.data, dims=2)) .|> imag)
+# 	itp = interpolate((τs,), +1.0im * diag(reverse(GᶠG.data .* conj(GᵇL.data) - GᶠL.data .* conj(GᵇG.data), dims=2)),
+# 		Gridded(Linear()))
 	
-	# plot(ts, -M.ft(mesh, data.fermi⁻ .* data.ΣᶠT[1] / (2pi))[2] |> imag)
-	# plot!(τs, +1.0im * model.V₀^2 * diag(reverse(GᵇG.data, dims=2)) .* diag(reverse(GᶜG.data, dims=2)) .|> imag)
+# 	Gd_ω = plot(mesh.mesh, imGd; 
+# 		label=L"A_d(\omega)", 
+# 		xlabel=L"\omega / D", xlims=(ωs[1], ωs[end]),
+# 		legend=:topright)
+# 	Gd_ω = plot!(ωs, M.ft(τs_lin, itp.(τs_lin))[2] |> imag;
+# 		label=L"\mathcal{F}_\tau\{A_d(\tau)\}(\omega)", 
+# 	)
 	
-	# mesh_real = M.NCA.LinearMesh(mesh.xmin, mesh.xmax, mesh.L)
-	# imGd = 1/(8pi) * (
-	# 	+ M.NCA.xcorr(mesh_real, fermi .* imag(GᵇT[1]), fermi⁻ .* imag(GᶠT[1]))
-	# 	+ M.NCA.xcorr(mesh_real, fermi⁻ .* imag(GᵇT[1]), fermi .* imag(GᶠT[1]))
-	# 	)
-	
-	# plot(ts, M.ft(mesh_real, 1.0im * imGd; mode=-1)[2] |> imag)
-	# plot!(τs, +1.0im * diag(reverse(GᶠG.data .* conj(GᵇL.data) - GᶠL.data .* conj(GᵇG.data), dims=2)) |> imag)
-	
-	# xlims!(0.25τs[1], 0.25τs[end])
-	
-	# Comparison of time solution with frequency solution
-	# τs_lin = range(τs[1], stop=τs[end], length=length(τs))
-	# ωs = M.ft(τs_lin, zero(τs_lin))[1]
-	
-	# itp = interpolate((τs,), +1.0im * diag(reverse(GᶠG.data .* conj(GᵇL.data) - GᶠL.data .* conj(GᵇG.data), dims=2)),
-	# 	Gridded(Linear()))
-	
-	# plot(ωs, M.ft(τs_lin, itp.(τs_lin))[2] |> imag)
-	# plot!(mesh_real.mesh, 4imGd)
-	
-	# itp = interpolate((τs,), diag(reverse(GᵇL.data, dims=2)), Gridded(Linear()))
-	# plot(ωs, -M.ft(τs_, itp.(τs_))[2] |> imag)
-	# plot!(mesh.mesh, data.fermi .* data.GᵇT[1] |> imag)
-	
-	# itp = interpolate((τs,), diag(reverse(GᵇG.data, dims=2)), Gridded(Linear()))
-	# plot(ωs, -M.ft(τs_, itp.(τs_))[2] |> imag)
-	# plot!(mesh.mesh, data.fermi⁻ .* data.GᵇT[1] |> imag)
-	
-	# itp = interpolate((τs,), diag(reverse(GᶠL.data, dims=2)), Gridded(Linear()))
-	# plot(ωs, M.ft(τs_, itp.(τs_))[2] |> imag)
-	# plot!(mesh.mesh, data.fermi .* data.GᶠT[1] |> imag)
-	
-	# itp = interpolate((τs,), diag(reverse(GᶠG.data, dims=2)), Gridded(Linear()))
-	# plot(ωs, -M.ft(τs_, itp.(τs_))[2] |> imag)
-	# plot!(mesh.mesh, data.fermi⁻ .* data.GᶠT[1] |> imag)
-	
-	# itp = interpolate((τs,), -2.0im * model.V₀^2 * diag(reverse(GᶠL.data, dims=2)) .* diag(reverse(-GᶜG.data', dims=2)), Gridded(Linear()))
-	# plot(ωs, -M.ft(τs_, itp.(τs_))[2] .|> imag)
-	# plot!(mesh.mesh, data.fermi .* data.ΣᵇT[1] |> imag)
-	
-	# itp = interpolate((τs,), -2.0im * model.V₀^2 * diag(reverse(GᶠG.data, dims=2)) .* diag(reverse(-GᶜL.data', dims=2)), Gridded(Linear()))
-	# plot(ωs, -M.ft(τs_, itp.(τs_))[2] .|> imag)
-	# plot!(mesh.mesh, data.fermi⁻ .* data.ΣᵇT[1] |> imag)
-	
-	# itp = interpolate((τs,), +1.0im * model.V₀^2 * diag(reverse(GᵇL.data, dims=2)) .* diag(reverse(GᶜL.data, dims=2)), Gridded(Linear()))
-	# plot(ωs, M.ft(τs_, itp.(τs_))[2] .|> imag)
-	# plot!(mesh.mesh, data.fermi .* data.ΣᶠT[1] |> imag)
-	
-	# itp = interpolate((τs,), +1.0im * model.V₀^2 * diag(reverse(GᵇG.data, dims=2)) .* diag(reverse(GᶜG.data, dims=2)), Gridded(Linear()))
-	# plot(ωs, -M.ft(τs_, itp.(τs_))[2] .|> imag)
-	# plot!(mesh.mesh, data.fermi⁻ .* data.ΣᶠT[1] |> imag)
-end
+# 	plot(Gd_τ, Gd_ω, layout = grid(2,1))
+# 	# savefig("equilibrium-comparison2.pdf")
+# end
 
 # ╔═╡ 19b432e6-1d14-11eb-1770-fda8ed6ad743
 @testset "KMS boundary conditions" begin
@@ -305,6 +301,6 @@ end
 # ╠═376c9bfc-1d05-11eb-2f4e-331c0302a14b
 # ╠═1fb01056-1d06-11eb-241f-49b9b90929dd
 # ╠═82b3677a-1d06-11eb-1a41-c3a9b29e9995
-# ╠═307b9eca-361b-11eb-3aff-99453f2940ea
 # ╠═aede18f0-360f-11eb-182f-0fbb1762f733
+# ╠═21e84c2a-5407-11eb-3bbf-6590b0ca21eb
 # ╠═19b432e6-1d14-11eb-1770-fda8ed6ad743
