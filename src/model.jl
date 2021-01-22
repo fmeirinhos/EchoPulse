@@ -1,6 +1,5 @@
-using NCA, NLsolve
-using KadanoffBaym, NumericalIntegration, ElasticArrays
-using Interpolations
+using NLsolve, NCA
+using FFTW, Interpolations, KadanoffBaym, NumericalIntegration, ElasticArrays
 using Parameters: @unpack
 using Test
 include("util.jl")
@@ -62,7 +61,7 @@ function ProblemData(model::PhotonAssitedModel, β::Real, mesh, nᵞ)
         V₀=model.V₀,
         ε₀f=model.ε₀f,
         tilde=true,
-        Nc₀=x->2pi * NCA.lorentzian(x, -0.0, model.σ)),
+        Nc₀=x->2pi * NCA.gaussian(x, -0.0, model.σ)),
       β=β,
       mesh=mesh)
 
@@ -104,8 +103,12 @@ function ProblemData(model::PhotonAssitedModel, β::Real, mesh, nᵞ)
   GᵇT = GreenFunction(ElasticArray(hcat(2im * imG_t[:,1])), MixedGreater)
   GᵇM = GreenFunction(ElasticArray(hcat(G[:,1])), MixedGreater)
 
-  GᵞL(t,t′) = -1.0im * exp(-1.0im * (t-t′) * model.ω₀) * (nᵞ[1](0.5(t+t′)) * nᵞ[2](t-t′))
-  GᵞG(t,t′) = -1.0im * exp(-1.0im * (t-t′) * model.ω₀) * (nᵞ[1](0.5(t+t′)) * nᵞ[2](t-t′) + 1)
+  GᵞL(t,t′) = -1.0im * exp(-1.0im * (t-t′) * model.ω₀) * nᵞ(0.5(t+t′)) * exp(-abs(t-t′) * model.δ₀)
+  GᵞG(t,t′) = -1.0im * exp(-1.0im * (t-t′) * model.ω₀) * (nᵞ(0.5(t+t′)) + 1) * exp(-abs(t-t′) * model.δ₀)
+  # GᵞL(t,t′) = -1.0im * (cos((t-t′) * model.ω₀) * (nᵞ(0.5(t+t′)) + 0.5) + 0.5 * sin((t-t′) * model.ω₀))
+  # GᵞG(t,t′) = -1.0im * (cos((t-t′) * model.ω₀) * (nᵞ(0.5(t+t′)) + 0.5) - 0.5 * sin((t-t′) * model.ω₀))
+  # GᵞL = GreenFunction(ones(1,1) * (-0.0im), Lesser)
+  # GᵞG = GreenFunction(ones(1,1) * (-1.0im), Greater)
 
   # Spectral report
   println("\nEquilibrium spectral function normalizations:")
@@ -163,6 +166,13 @@ function f_vert_time(model::PhotonAssitedModel,data::ProblemData,times,t1,t2)
   dGᵇG = -1.0im * (λ₀ * GᵇG[t1,t2] + ∫dt(t2,t1,ΣᵇG,GᵇG))
   
   return [dGᶠL, dGᶠG, dGᵇL, dGᵇG]
+  # # thz pulse
+  # @unpack GᵞL,GᵞG = data
+  # @unpack ω₀ = model
+  # λ, γ = model.λ(times[t1]), model.γ(times[t1])
+  # dGᵞL = -1.0im * ((ω₀ - 0.5im * (γ + λ)) * GᵞL[t1,t2] + 1.0im * γ * (t1 >= t2 ? GᵞL[t1,t2] : GᵞG[t1,t2]))
+  # dGᵞG = -1.0im * ((ω₀ + 0.5im * (γ + λ)) * GᵞG[t1,t2] - 1.0im * λ * (t1 >= t2 ? GᵞG[t1,t2] : GᵞL[t1,t2]))
+  # return [dGᶠL, dGᶠG, dGᵇL, dGᵇG, dGᵞL, dGᵞG]
 end
 
 function f_diag_time(model::PhotonAssitedModel,data::ProblemData,times,t1)
@@ -189,6 +199,12 @@ function f_diag_time(model::PhotonAssitedModel,data::ProblemData,times,t1)
   dGᵇG = 0.0
   
   return [dGᶠL, dGᶠG, dGᵇL, dGᵇG]
+  # # thz pulse
+  # @unpack GᵞL,GᵞG = data
+  # λ, γ = model.λ(times[t1]), model.γ(times[t1])
+  # dGᵞL = -1.0im * (-1.0im * λ * GᵞL[t1,t1] + 1.0im * γ * GᵞG[t1,t1])
+  # dGᵞG = -1.0im * (-1.0im * λ * GᵞL[t1,t1] + 1.0im * γ * GᵞG[t1,t1])
+  # return [dGᶠL, dGᶠG, dGᵇL, dGᵇG, dGᵞL, dGᵞG]
 end
 
 function f_vert_freq(model::PhotonAssitedModel,data::ProblemData,times,t1,t2)
@@ -266,6 +282,8 @@ function calculate_Σ_time!(model::PhotonAssitedModel,data::ProblemData,times,t1
 
   V²L = V₀^2 + Γ₀^2 * 1.0im * (GᵞL(times[t1],times[t2]) + GᵞG(times[t2],times[t1]))
   V²G = V₀^2 + Γ₀^2 * 1.0im * (GᵞG(times[t1],times[t2]) + GᵞL(times[t2],times[t1]))
+  # V²L = V₀^2 + Γ₀^2 * 1.0im * (GᵞL[t1,t2] + GᵞG[t2,t1])
+  # V²G = V₀^2 + Γ₀^2 * 1.0im * (GᵞG[t1,t2] + GᵞL[t2,t1])
 
   ΣᶠL[t1,t2] = +1.0im * V²L * GᵇL[t1,t2] * GᶜL(times[t1] - times[t2])
   ΣᶠG[t1,t2] = +1.0im * V²G * GᵇG[t1,t2] * GᶜG(times[t1] - times[t2])

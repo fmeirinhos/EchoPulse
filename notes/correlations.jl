@@ -6,21 +6,12 @@ using InteractiveUtils
 
 # ╔═╡ f6eb14a0-1d04-11eb-21ab-5fe40ebb915d
 begin
-	using Revise
 	using SpecialFunctions: erf, erfc
-	using LinearAlgebra: diag, diagind, norm
+	using LinearAlgebra: diag, norm
 	using Parameters: @unpack
-	using Plots; Plots.gr(); #Plots.plotly()
-	using LaTeXStrings
-	using Test
+	using Plots, LaTeXStrings
+	Plots.gr(); #Plots.plotly()
 end
-
-# ╔═╡ b44ab15a-4d2e-11eb-16dc-21ca8a270562
-html"""<style>
-main {
-    max-width: 1000px;
-}
-"""
 
 # ╔═╡ 13bb1f84-1d06-11eb-306b-5bef219f7434
 module M
@@ -28,7 +19,7 @@ module M
 		include("../src/model.jl")
 		include("../src/util.jl")
 	end
-end 
+end
 
 # ╔═╡ 25249ec4-1d05-11eb-211f-17a1bb80cd03
 model, data = let β=1e2,  # temperature
@@ -42,9 +33,9 @@ model, data = let β=1e2,  # temperature
 
 	model = M.PhotonAssitedModel(
 		#= SIAM parameters =#
-		V₀=sqrt(0.1),
-		ε₀f=-0.5,
-		σ=0.2,
+		V₀=sqrt(0.1),	# hybridization strength
+		ε₀f=-0.5, 		# d-electron energy
+		σ=0.4,			# gaussian cdos width
 
 		#= pulse parameters =#
 		Γ₀=sqrt(0.05),  # light-matter coupling
@@ -60,21 +51,42 @@ end;
 
 # ╔═╡ 376c9bfc-1d05-11eb-2f4e-331c0302a14b
 begin
-	plot(data.mesh.mesh, data.GᵇT[1] |> imag;
-		label=L"$\tilde{A}_b$")
-	plot!(data.mesh.mesh, data.GᶠT[1] |> imag;
-		label=L"$\tilde{A}_f$", legend=:topleft)
-	plot!(twinx(), data.mesh.mesh, data.GᶜA[1] |> imag;
-		label=L"$A_c$", linecolor=:green, grid=false, legend=:topright)
-	title!(L"\textrm{Equilibrium spectral functions}")
-	xlabel!(L"$\omega/D$")
+	imGd = 1/(2pi) * real(
+		+ M.NCA.xcorr(data.mesh, data.fermi .* imag(data.GᵇT[1]), data.fermi⁻ .* imag(data.GᶠT[1]))
+		+ M.NCA.xcorr(data.mesh, data.fermi⁻ .* imag(data.GᵇT[1]), data.fermi .* imag(data.GᶠT[1]))
+		)
+	
+	plot(data.mesh.mesh, data.GᶜA[1] |> imag;
+		label=L"$A_c$", 
+		linecolor=:green,
+		legend=:topleft,
+		xlabel=L"$\omega/D$",
+		xlims=(-5.0, 5.0),
+		title=L"\textrm{Equilibrium spectral functions}"
+		)
+	
+	plot!(data.mesh.mesh, imGd,
+		label=L"$A_d$",
+		linecolor=:darkorange)
+	
+	plot!([model.ε₀f, model.ε₀f], [extrema(imGd)...];
+		label=L"\varepsilon_d",
+		line=(:dot, 1.0, :blue, 0.5))
+	
+	# plot!(twinx(), data.mesh.mesh, [data.GᵇT[1] |> imag, data.GᶠT[1] |> imag];
+	# 	label=[L"$\tilde{A}_b$", L"$\tilde{A}_f$"],
+	# 	grid=false, 
+	# 	legend=:topright,
+	# 	alpha=0.5
+	# 	)
+
 	# savefig("equilibrium-spectra.pdf")
 end
 
 # ╔═╡ 1fb01056-1d06-11eb-241f-49b9b90929dd
 begin
 	# Initial condition
-	u0 = [data.GᶠL,data.GᶠG,data.GᵇL,data.GᵇG]
+	u0 = [data.GᶠL,data.GᶠG,data.GᵇL,data.GᵇG]#,data.GᵞL,data.GᵞG]
 	l0 = [data.GᶜA,data.GᶠT,data.GᶠM,data.GᵇT,data.GᵇM]
 	
 	# Vertical step
@@ -127,49 +139,60 @@ end
 
 # ╔═╡ 82b3677a-1d06-11eb-1a41-c3a9b29e9995
 begin
-	using Interpolations
+	# Spectral function
+	ρt = +1.0im * (GᶠG.data .* conj(GᵇL.data) - GᶠL.data .* conj(GᵇG.data))
+	ρτ, _ = M.wigner_transform_itp(ρt, times; fourier=false)
+	ρω, (x_, y_) = M.wigner_transform_itp(ρt, times; fourier=true)
 	
-	times_lin = range(first(times), stop=last(times), length=length(times))
-	
-	gd_itp = interpolate((times,times), +1.0im * (GᶠG.data .* conj(GᵇL.data) - GᶠL.data .* conj(GᵇG.data)), Gridded(Linear()))
-	
-	ρ, (x_, y_) = M.wigner_transform([gd_itp(t1,t2) for t1 in times_lin, t2 in times_lin]; 
-		ts=times_lin, fourier=true)
-	
-	h1 = heatmap(y_, x_, -ρ |> real;
-		xaxis=nothing, ylabel=L"\omega / D", ylims=(-2.5, 2.5), legend=:none, c=:magma)
+	h1 = heatmap(y_, x_, -ρω |> real;
+		xaxis=nothing,
+		ylabel=L"\omega / D",
+		ylims=(-2.5, 2.5),
+		legend=:none,
+		c=:magma,
+		title=L"A_d(\omega,T)")
 	
 	colorbar = scatter([0,0], [1,1], zcolor=[0,1];
-		xaxis=nothing, xlims=(1,1), yaxis=nothing, label=nothing, grid=nothing, 
-		c=:magma, clims=extrema(-ρ |> real))
+		xaxis=nothing,
+		xlims=(1,1),
+		yaxis=nothing,
+		label=nothing,
+		grid=nothing, 
+		c=:magma,
+		clims=extrema(-ρω |> real))
 	
 	# Occupations
 	p1 = plot(times, GᶠL.data |> imag ∘ diag;
-		label=L"n_f")
+		label=L"n_f",
+		title=L"\textrm{Field occupations}")
 	p1 = plot!(times, -GᵇL.data |> imag ∘ diag;
 		label=L"n_b")
 	p1 = plot!(times, (2GᶠL.data - GᵇL.data) |> imag ∘ diag;
-		label=L"Q", line=(:dot, :grey, 1), legend=:topleft, xlims=extrema(times))
+		label=L"Q",
+		line=(:dot, :grey, 1),
+		legend=:topleft,
+		xlims=extrema(times))
+	
+	plt = twinx()
+	
+	# THz pulse
+	pulse = [-GᵞL(t,t) for t in times] |> imag # data.GᵞL.data |> (-) ∘ imag ∘ diag
+	
+	p1 = plot!(plt, times, pulse;
+		label=L"n_\gamma",
+		line=(:dot, :green),
+		legend=:topright,
+		xlabel=L"T\;D",
+		xlims=extrema(times), 
+		grid=false)
 	
 	# Kondo time-scale
 	kondo_T = 1 / M.NCA.kondo_temp(data.mesh, vec(data.GᶜA.data) ./ (2pi) |> imag, model.ε₀f, model.V₀)
 	
-	# THz pulse
-	pulse = [-GᵞL(t,t) for t in times] |> imag
-	
-	p1 = plot!(twinx(), times, pulse;
-		label=L"n_\gamma", line=(:dot, :green), legend=:topright,
-		xlabel=L"T\;D \quad(T_K\;D=%$(round(kondo_T, digits=3)))", xlims=extrema(times), grid=false)
-		
-	tK_grid = range(-1.0, 1.0, length=2) #NOTE: Needs an even number for a centred vspan
-	
-	for t in 2:length(tK_grid)		
-		vspan!(times[findmax(pulse)[2]] .+ kondo_T .* [tK_grid[t-1], tK_grid[t]];
-			alpha=0.5ℯ^(-abs(tK_grid[t])), fillcolor=:grey,
-			linealpha=0.5ℯ^(-abs(tK_grid[t])), linecolor=:grey,
-			markersize=0,
-			label=nothing)
-	end
+	vspan!(plt, times[findmax(pulse)[2]] .+ kondo_T .* [-0.5, +0.5];
+		fillcolor=:grey,
+		alpha=0.3,
+		label=L"T_K")
 	
 	plot(h1, p1, colorbar, layout = @layout [grid(2, 1) a{0.05w}])
 	# savefig("ad_wigner.pdf")
@@ -294,7 +317,6 @@ end
 end
 
 # ╔═╡ Cell order:
-# ╠═b44ab15a-4d2e-11eb-16dc-21ca8a270562
 # ╠═f6eb14a0-1d04-11eb-21ab-5fe40ebb915d
 # ╠═13bb1f84-1d06-11eb-306b-5bef219f7434
 # ╠═25249ec4-1d05-11eb-211f-17a1bb80cd03
