@@ -1,53 +1,102 @@
 ### A Pluto.jl notebook ###
-# v0.12.18
+# v0.12.20
 
 using Markdown
 using InteractiveUtils
 
-# ╔═╡ f6eb14a0-1d04-11eb-21ab-5fe40ebb915d
-begin
-	using SpecialFunctions: erf, erfc
-	using LinearAlgebra: diag, norm
-	using Parameters: @unpack
-	using Plots, LaTeXStrings
-	Plots.gr(); #Plots.plotly()
-end
-
 # ╔═╡ 13bb1f84-1d06-11eb-306b-5bef219f7434
 module M
 	begin
+		using NLsolve, DSP, NCA
+		using DSP.FFTW, Interpolations, KadanoffBaym
+		using NumericalIntegration, ElasticArrays
+		using Parameters: @unpack
+		using Test
 		include("../src/model.jl")
+		using DSP.FFTW: fftfreq
 		include("../src/util.jl")
 	end
 end
 
-# ╔═╡ 25249ec4-1d05-11eb-211f-17a1bb80cd03
-model, data = let β=1e2,  # temperature
-	nᵞ = 0,  # initial photon occupation
-	tc = 120, # peak arrival time
-	Ω = 0.2, # frequency bandwitdh of the pulse
-	Γ = 20., # pump and loss strength
-	
-	# Pulse shape
-	ξ(t) = (Ω^2 / (2π))^(1/4) * exp(-(t - tc)^2 * (Ω^2 / 4))
+# ╔═╡ 3d95b35a-5e76-11eb-3118-61d944fb7c9a
+begin
+	using LinearAlgebra: diag, norm
+	using Plots, LaTeXStrings
+	Plots.gr()
+end;
 
+# ╔═╡ 25249ec4-1d05-11eb-211f-17a1bb80cd03
+# This controls all the parameters of our model
+model, data, time_span = begin 
+	β  = 1.0e3  # temperature
+	tc = 8.0e1  # frequency bandwitdh of the gaussian pulse
+	Ω  = 2e-1 	# peak arrival time
+	Π  = 1.0e1  # maximum photon occupation
+	
 	model = M.PhotonAssitedModel(
 		#= SIAM parameters =#
-		V₀=sqrt(0.1),	# hybridization strength
-		ε₀f=-0.5, 		# d-electron energy
-		σ=0.4,			# gaussian cdos width
+		V₀=sqrt(0.08),	# hybridization strength
+		ε₀f=-0.5,		# d-electron energy
+		σ=0.45,			# gaussian cdos width
 
-		#= pulse parameters =#
-		Γ₀=sqrt(0.05),  # light-matter coupling
-		ω₀=0.01, # photon-ground state energy
-		δ₀=Ω # photon artificial width
-		# γ=t->Γ * ξ(t),
-		# λ=t->Γ * ξ(t) / sqrt(0.5 * erfc((t - tc) * Ω / sqrt(2)))
+		#= quantum light parameters =#
+		Γ₀=sqrt(0.01),  # light-matter coupling
+		ω₀=1e0, 		# photon energy
+		Ω=Ω,			# frequency bandwitdh of the gaussian pulse
+		tc=tc,			# peak arrival time
+		Π=Π 			# maximum photon occupation
 	)
-
-	data = M.ProblemData(model, β, M.NCA.LinearMesh(-15.0, 15.0, 2^15), (T -> 15ξ(T), τ -> 15ξ(tc+τ)))
-	model, data
+	
+	# Pulse shape s.t. ∫dt ξ(t)^2 = 1
+	ξ(t) = (Ω^2 / (2π))^(1/4) * exp(-(t - tc)^2 * (Ω^2 / 4))
+	
+	data = M.ProblemData(
+		model, 
+		β, 
+		M.NCA.LinearMesh(-20.0, 20.0, 2^16),  
+		T -> (Π / Ω * sqrt(2pi)) * ξ(T)^2)
+	
+	time_span = (0.0, 250.0)
+	
+	model, data, time_span
 end;
+
+# ╔═╡ dfded9cc-5efe-11eb-387d-a35f79859dd8
+begin
+	cecu6_bandwidth = 2.0# eV
+	cdos_bandwidth = 6model.σ # 3σ
+	to_eV = cecu6_bandwidth / cdos_bandwidth
+	fwmh_gaussian = 2 * sqrt(2 * log(2))
+	fwmh_lorentzi = 2
+	ω_to_eV(ω) = round(ω * to_eV , digits=3)
+	ω_to_THz(ω) = round(ω * to_eV * 2.4179893e2, digits=3)
+	ω_to_ps(ω) = round(inv(ω * to_eV * 2.4179893e2), digits=4)
+	ω_to_K(ω) = round(ω * to_eV * 1.1604518e4, digits=3)
+	
+	# Kondo frequency
+	ωK = M.NCA.kondo_temp(data.mesh, vec(data.GᶜA.data) ./ (2pi) |> imag, model.ε₀f, model.V₀)
+	
+md"
+#### Summary
+Assuming the bandwidth of $\textrm{CeCu}_6$ to be ``\sim`` $cecu6_bandwidth ``eV``, the chosen SIAM parameters were
+1. ``\varepsilon_d =`` $(ω_to_eV(model.ε₀f)) ``eV`` (``d-``orbital energy)
+2. ``V_0 =  `` $(ω_to_eV(model.V₀)) ``eV`` (hybridisation strength)
+3. ``T_K = `` $(ω_to_K(ωK)) ``K`` (Kondo temperature: $(ω_to_ps(ωK)) ``ps``)
+4. ``T = `` $(ω_to_K(1/β))  ``K`` (system temperature)
+and the gaussian-shaped pulse parameters were
+5. ``\omega = `` $(ω_to_THz(model.ω₀)) ``THz`` (pulse energy)
+6. ``\Omega = `` $(ω_to_THz(Ω)) ``THz``  (pulse bandwidth: $(6ω_to_ps(Ω)) ``ps``)
+7. ``\Gamma = `` $(ω_to_eV(model.Γ₀)) ``eV`` (light-matter coupling)
+8. ``\Pi = `` $(round(Π, digits=3)) ``n_\gamma`` (maximum photon-field occupation)
+
+The system will be integrated from $(ω_to_ps(1/time_span[1])) to $(ω_to_ps(1/time_span[2])) ps with the light-pulse reaching its maximum at $(ω_to_ps(1/tc)) ps.
+
+###### Questions
+1. Do we need to shift the photons energy by the chemical potential?
+2. How to convert maximum photon occupation to ``MV cm^{-1}``
+3. Fix angular frequency problems: ``2\pi \omega t``
+"
+end
 
 # ╔═╡ 376c9bfc-1d05-11eb-2f4e-331c0302a14b
 begin
@@ -56,98 +105,161 @@ begin
 		+ M.NCA.xcorr(data.mesh, data.fermi⁻ .* imag(data.GᵇT[1]), data.fermi .* imag(data.GᶠT[1]))
 		)
 	
-	plot(data.mesh.mesh, data.GᶜA[1] |> imag;
+	plot(ω_to_eV.(data.mesh.mesh), data.GᶜA[1] |> imag;
 		label=L"$A_c$", 
 		linecolor=:green,
 		legend=:topleft,
-		xlabel=L"$\omega/D$",
-		xlims=(-5.0, 5.0),
+		xlabel=L"\omega \quad (eV)",#L"$\omega/D$",
+		xlims=ω_to_eV.((-5.0, 5.0)),
 		title=L"\textrm{Equilibrium spectral functions}"
 		)
 	
-	plot!(data.mesh.mesh, imGd,
+	plot!(ω_to_eV.(data.mesh.mesh), imGd,
 		label=L"$A_d$",
 		linecolor=:darkorange)
 	
-	plot!([model.ε₀f, model.ε₀f], [extrema(imGd)...];
+	vline!(ω_to_eV.([model.ε₀f]);
 		label=L"\varepsilon_d",
 		line=(:dot, 1.0, :blue, 0.5))
 	
-	# plot!(twinx(), data.mesh.mesh, [data.GᵇT[1] |> imag, data.GᶠT[1] |> imag];
-	# 	label=[L"$\tilde{A}_b$", L"$\tilde{A}_f$"],
-	# 	grid=false, 
-	# 	legend=:topright,
-	# 	alpha=0.5
-	# 	)
-
-	# savefig("equilibrium-spectra.pdf")
+	vspan!(ω_to_eV.([-ωK/2, ωK/2]);
+		fillcolor=:grey,
+		alpha=0.3,
+		label=L"\omega_K")
 end
 
 # ╔═╡ 1fb01056-1d06-11eb-241f-49b9b90929dd
+# This controls the integration
 begin
-	# Initial condition
-	u0 = [data.GᶠL,data.GᶠG,data.GᵇL,data.GᵇG]#,data.GᵞL,data.GᵞG]
-	l0 = [data.GᶜA,data.GᶠT,data.GᶠM,data.GᵇT,data.GᵇM]
-	
-	# Vertical step
-	f_vert(u, times, t1::Int, t2::Int) = M.f_vert_time(model, data, times, t1, t2)
-	f_vert(u, v, times, t1::Int, t2::Int) = f_vert(u, times, t1, t2) .+ M.f_vert_freq(model, data, times, t1, t2)
-	
-	# Diagonal step
-	f_diag(u, times, t1::Int) = (println("t: $(round(times[t1]; digits=3))"); M.f_diag_time(model, data, times, t1))
-	f_diag(u, v, times, t1::Int) = f_diag(u, times, t1) .+ update_norms!(M.f_diag_freq(model, data, times, t1))
-	
-	# Vertical step for mixed functions
-	f_line(u, v, times, t1::Int) = M.f_line_freq(model, data, times, t1)
-	
-	thermal_norms = float(Inf)
-	update_norms!(n) = (global thermal_norms; thermal_norms = norm.(n); n)
-	
-	# Criteria for evaluating the thermal collision integrals
-	# TODO: Accumulate norms over horizontal step (don't take into account just the diagonal)
-	thermal_criteria(norms) = max(norms...) < 1e-7
-
-	tspan = (0.0,200.0)
-	
-	# @time sol, caches = M.kbsolve(f_vert, f_diag, u0, tspan;
-	# 	update_time =(_,t1,t2)->M.calculate_Σ_time!(model,data,t1,t2),
-	# 	f_line=f_line, l0 = l0,
-	# 	update_line =(_,t1)->M.calculate_Σ_freq!(model,data,t1),
-	# 	# stop=()->thermal_criteria(thermal_norms),
-	# 	dtini=1e-5, atol=1e-6, rtol=5e-4, dtmax=0.5)
-	
-	# If we don't need to evaluate the thermal collision integrals anymore
-	# if thermal_criteria(thermal_norms)
-	#   # We need a new integrator-state without the mixed functions
-	#   state = KadanoffBaym.VCABMState((state.u[1],), state.t, state.dt)
-	#   state, caches = kbsolve(f_vert, f_diag, u0[1], tspan[1], tspan[2];
-	# 	atol=1e-7, rtol=1e-5, max_dt=1.0,
-	# 	w_time! = (t1,t2) -> calculate_Σ_time!(model,data,t1,t2),
-	# 	st_ch = (state, caches))
-	# end
-
-	# The solver will stop when tspan[2] is reached or `stop` evaluates to `false`
-	@time sol, caches = M.kbsolve(f_vert, f_diag, u0, tspan;
-		atol=1e-6, rtol=1e-3, dtini=1e-8, dtmax=10.,
+	@time sol, caches = M.kbsolve(
+		(_,t,t1,t2) -> M.f_vert_time(model, data, t, t1, t2), 
+		(_,t,t1) -> M.f_diag_time(model, data, t, t1), 
+		[data.GᶠL,data.GᶠG,data.GᵇL,data.GᵇG],# data.GᵞL,data.GᵞG,data.GᵞL₀,data.GᵞG₀], 
+		time_span;
+		atol=1e-6, rtol=1e-3, dtini=1e-6, dtmax=10.,
 		update_time =(t,t1,t2)->M.calculate_Σ_time!(model,data,t,t1,t2))
-	
+
 	# Extract info
-	@unpack GᶜL,GᶜG,GᶠL,GᶠG,GᵇL,GᵇG,GᵞL,GᵞG,ΣᶠG,ΣᵇG,ΣᶠL,ΣᵇL = data
-	@unpack GᶜA,GᶠT,GᶠM,GᵇT,GᵇM,ΣᶠT,ΣᶠM,ΣᵇT,ΣᵇM,mesh,fermi,fermi⁻ = data
-	times = sol.t;
-end
+	M.@unpack GᶜL,GᶜG,GᶠL,GᶠG,GᵇL,GᵇG,ΣᶠG,ΣᵇG,ΣᶠL,ΣᵇL = data
+	times = sol.t
+end;
+
+# ╔═╡ 834f9d50-60c9-11eb-3207-3bb56de82801
+begin
+	function integrate(x::AbstractVector, y::AbstractVector)
+		if isone(length(x))
+			return zero(first(y))
+		end
+		@inbounds retval = (x[2] - x[1]) * (y[1] + y[2])
+		@inbounds @fastmath @simd for i in 2:(length(y) - 1)
+			retval += (x[i+1] - x[i]) * (y[i] + y[i+1])
+		end
+		return 1//2 * retval
+	end
+	
+	struct TimeOrdered end
+	struct AntiTimeOrdered end
+	
+	struct OrderedGF{T}
+		L
+		G
+	end
+
+	function Base.getindex(G::OrderedGF{TimeOrdered}, t1::Int, t2::Int)
+		t1 > t2 ? G.G[t1,t2] : G.L[t1,t2]
+	end
+	function Base.getindex(G::OrderedGF{AntiTimeOrdered}, t1::Int, t2::Int)
+		t1 >= t2 ? G.L[t1,t2] : G.G[t1,t2]
+	end
+	Base.getindex(G::OrderedGF, t1::Int, ::Colon) = [G[t1,t] for t in 1:size(G.L,2)]
+	Base.getindex(G::OrderedGF, ::Colon, t2::Int) = [G[t,t2] for t in 1:size(G.L,1)]
+	
+	const TO = OrderedGF{TimeOrdered}
+	const ATO = OrderedGF{AntiTimeOrdered}
+	
+	function dyson_lesser1(GL, GG, TL, TG)
+		G = copy(GL)
+		
+		for t in eachindex(times)			
+			G[t,t] += integrate(times, [TO(GL,GG)[t,t′] * (
+						+ integrate(times, TO(TL,TG)[t′,:] .* GL[:,t])
+						- integrate(times, TL[t′,:] .* ATO(GL,GG)[:,t])
+							) for t′ in eachindex(times)])
+			
+			G[t,t] -= integrate(times, [GL[t,t′] * (
+						+ integrate(times, TG[t′,:] .* GL[:,t])
+						- integrate(times, ATO(TL,TG)[t′,:] .* ATO(GL,GG)[:,t])
+							) for t′ in eachindex(times)])
+		end
+		
+		return diag(G)
+	end
+	
+	function dyson_lesser2(g0L, g0G, tL, tG)
+		g = copy(g0L)
+
+		for t1 in eachindex(times)
+			t2 = t1
+
+			function ∫dt(i,j,A,B::Function)
+				return sign(j-i) * integrate(times[min(i,j):max(i,j)], 
+					[A[t1,t] * B(t) for t=min(i,j):max(i,j)])
+			end
+
+			function ∫dt(t,i,j,A,B)
+				retval = zero(eltype(A))
+				@fastmath @simd for k in min(i,j):(max(i,j)-1)
+					@inbounds retval += (times[k+1] - times[k]) * (A[t,k]*B[k,t2] + A[t,k+1]*B[k+1,t2])
+				end
+				return 1//2 * sign(j-i) * retval
+			end
+
+			g[t1,t2] += ∫dt(1, t1, g0G, t -> begin 
+				∫dt(t,1,t,tG,g0L) + 
+				∫dt(t,t,t2,tL,g0L) +
+				∫dt(t,t2,1,tL,g0G)
+			end)
+			g[t1,t2] += ∫dt(t2, 1, g0L, t -> begin
+				∫dt(t,1,t2,tG,g0L) + 
+				∫dt(t,t2,t,tG,g0G) +
+				∫dt(t,t,1,tL,g0G)
+			end)
+		end
+		return g
+	end
+	
+	# NOTE: Still have to be debuged!
+	function dyson_lesser3(G0L, G0G, TL, TG)
+		GL = copy(G0L)
+
+		for t in eachindex(times)
+			GL[t,t] += integrate(times, [G0G[t,t′] * (
+						+ integrate(times[1:t′], TG[t′,1:t′] .* G0L[1:t′,t])
+						+ integrate(times[t′:t], TL[t′,t′:t] .* G0L[t′:t,t])
+						- integrate(times, TL[t′,:] .* G0G[:,t])
+							) for t′ in eachindex(times)])
+
+			GL[t,t] -= integrate(times, [G0L[t,t′] * (
+						+ integrate(times, TG[t′,:] .* G0L[:,t])
+						- integrate(times[t′:t], TG[t′,t′:t] .* G0G[t′:t,t])
+						- integrate(times[1:t′], TL[t′,1:t′] .* G0G[1:t′,t])
+							) for t′ in eachindex(times)])
+		end
+		return GL
+	end
+end;
 
 # ╔═╡ 82b3677a-1d06-11eb-1a41-c3a9b29e9995
 begin
 	# Spectral function
 	ρt = +1.0im * (GᶠG.data .* conj(GᵇL.data) - GᶠL.data .* conj(GᵇG.data))
-	ρτ, _ = M.wigner_transform_itp(ρt, times; fourier=false)
-	ρω, (x_, y_) = M.wigner_transform_itp(ρt, times; fourier=true)
+	ρτ, (τs, Ts) = M.wigner_transform_itp(ρt, times; fourier=false)
+	ρω, (ωs, Ts) = M.wigner_transform_itp(ρt, times; fourier=true)
 	
-	h1 = heatmap(y_, x_, -ρω |> real;
+	h1 = heatmap(ω_to_ps.(inv.(Ts)), ω_to_eV.(ωs), -ρω |> real;
 		xaxis=nothing,
-		ylabel=L"\omega / D",
-		ylims=(-2.5, 2.5),
+		ylabel=L"\omega \quad(eV)",#L"\omega / D",
+		# ylims=(-2.5, 2.5),
 		legend=:none,
 		c=:magma,
 		title=L"A_d(\omega,T)")
@@ -162,34 +274,42 @@ begin
 		clims=extrema(-ρω |> real))
 	
 	# Occupations
-	p1 = plot(times, GᶠL.data |> imag ∘ diag;
+	p1 = plot(ω_to_ps.(inv.(times)), GᶠL.data |> imag ∘ diag;
 		label=L"n_f",
 		title=L"\textrm{Field occupations}")
-	p1 = plot!(times, -GᵇL.data |> imag ∘ diag;
+	p1 = plot!(ω_to_ps.(inv.(times)), -GᵇL.data |> imag ∘ diag;
 		label=L"n_b")
-	p1 = plot!(times, (2GᶠL.data - GᵇL.data) |> imag ∘ diag;
+	p1 = plot!(ω_to_ps.(inv.(times)), (2GᶠL.data - GᵇL.data) |> imag ∘ diag;
 		label=L"Q",
 		line=(:dot, :grey, 1),
 		legend=:topleft,
-		xlims=extrema(times))
+		xlims=ω_to_ps.(inv.(times)))
 	
 	plt = twinx()
 	
 	# THz pulse
-	pulse = [-GᵞL(t,t) for t in times] |> imag # data.GᵞL.data |> (-) ∘ imag ∘ diag
+	G0L = [data.GᵞL₀(t,t′) for t in times, t′ in times]
+	G0G = [data.GᵞG₀(t,t′) for t in times, t′ in times]
 	
-	p1 = plot!(plt, times, pulse;
-		label=L"n_\gamma",
-		line=(:dot, :green),
+	TL = data.TᵞL.data[1:length(times),1:length(times)]
+	TG = data.TᵞG.data[1:length(times),1:length(times)]
+	
+	GL = dyson_lesser1(G0L, G0G, TL, TG)
+	
+	p1 = plot!(plt, ω_to_ps.(inv.(times)), G0L |> (-) ∘ imag ∘ diag;
+		label=nothing,
+		line=(:green, 3.0, 0.2),
 		legend=:topright,
-		xlabel=L"T\;D",
-		xlims=extrema(times), 
+		xlabel=L"T \quad (ps)",#L"T\;D",
+		xlims=ω_to_ps.(inv.(times)),
 		grid=false)
+	p1 = plot!(plt, ω_to_ps.(inv.(times)), GL |> (-) ∘ imag;
+		label=L"n_\gamma",
+		line=(:green))
 	
 	# Kondo time-scale
-	kondo_T = 1 / M.NCA.kondo_temp(data.mesh, vec(data.GᶜA.data) ./ (2pi) |> imag, model.ε₀f, model.V₀)
-	
-	vspan!(plt, times[findmax(pulse)[2]] .+ kondo_T .* [-0.5, +0.5];
+	t_max_pulse = times[findmax(G0L |> (-) ∘ imag ∘ diag)[2]]
+	vspan!(plt, ω_to_ps.(inv.(t_max_pulse .+ 1/ωK .* [-0.5, +0.5]));
 		fillcolor=:grey,
 		alpha=0.3,
 		label=L"T_K")
@@ -200,15 +320,14 @@ end
 
 # ╔═╡ aede18f0-360f-11eb-182f-0fbb1762f733
 # # Comparison of frequency solution with time solution
+# # NOTE: Make sure that the light-matter coupling is zero!
 # begin
 # 	ts = M.ft(mesh, zero(mesh.mesh), mode=-1)[1]
 	
 # 	x = hcat(data.GᵇT[1], data.GᶠT[1], data.GᶜA[1]) ./ (2pi)
 # 	L = mapslices(x -> M.ft(mesh, x .* data.fermi, mode=-1)[2], x, dims=1) # Lesser
 # 	G = mapslices(x -> M.ft(mesh, x .* data.fermi⁻, mode=-1)[2], x, dims=1) # Spectral
-	
-# 	τs = times - reverse(times)
-	
+		
 # 	GbLτ = plot(ts, -L[:,1] |> imag;
 # 		label=L"\mathcal{F}_\omega\{G^<_b\}(\tau)", legend=:bottomright, xlims=(0.25τs[1], 0.25τs[end]), xlabel=L"\tau D")
 # 	GbLτ = plot!(τs, diag(reverse(GᵇL.data, dims=2)) |> imag;
@@ -244,31 +363,25 @@ end
 # end
 
 # ╔═╡ 21e84c2a-5407-11eb-3bbf-6590b0ca21eb
+# # Comparison of frequency *projected* solution with time solution
+# # NOTE: Make sure that the light-matter coupling is zero!
 # begin
-# 	mesh_real = M.NCA.LinearMesh(mesh.xmin, mesh.xmax, mesh.L)
-# 	imGd = 1/(2pi) * (
-# 		+ M.NCA.xcorr(mesh_real, fermi .* imag(GᵇT[1]), fermi⁻ .* imag(GᶠT[1]))
-# 		+ M.NCA.xcorr(mesh_real, fermi⁻ .* imag(GᵇT[1]), fermi .* imag(GᶠT[1]))
-# 		)
-	
-# 	Gd_τ = plot(ts, 1/(2pi) * M.ft(mesh_real, 1.0im * imGd; mode=-1)[2] |> imag;
+# 	Gd_τ = plot(ts, 1/(2pi) * M.ft(mesh.mesh, 1.0im * imGd; mode=-1)[2] |> imag;
 # 		label=L"\mathcal{F}^{-1}_\omega\{A_d(\omega)\}(\tau)", 
-# 		xlabel=L"\tau \;D", xlims=(0.25τs[1], 0.25τs[end]), 
-# 		legend=:topright)
-# 	Gd_τ = plot!(τs, 1im * diag(reverse(GᶠG.data .* conj(GᵇL.data) - GᶠL.data .* conj(GᵇG.data), dims=2)) |> imag;
-# 		label=L"A_d(\tau)")
+# 		xlabel=L"\tau \;D", 
+# 		xlims=(0.25τs[1], 0.25τs[end]), 
+# 		legend=:topright,
+# 		alpha=1.0, ms=1.0)
 	
-# 	τs_lin = range(τs[1], stop=τs[end], length=length(τs))
-# 	ωs = M.ft(τs_lin, zero(τs_lin))[1]
-	
-# 	itp = interpolate((τs,), +1.0im * diag(reverse(GᶠG.data .* conj(GᵇL.data) - GᶠL.data .* conj(GᵇG.data), dims=2)),
-# 		Gridded(Linear()))
-	
+# 	Gd_τ = plot!(τs, reverse(ρt, dims=2) |> diag ∘ imag;
+# 		label=L"A_d(\tau)", ms=2.0)
+		
 # 	Gd_ω = plot(mesh.mesh, imGd; 
 # 		label=L"A_d(\omega)", 
 # 		xlabel=L"\omega / D", xlims=(ωs[1], ωs[end]),
 # 		legend=:topright)
-# 	Gd_ω = plot!(ωs, M.ft(τs_lin, itp.(τs_lin))[2] |> imag;
+	
+# 	Gd_ω = plot!(ωs, -ρω[:,length(times) ÷ 2] |> real;
 # 		label=L"\mathcal{F}_\tau\{A_d(\tau)\}(\omega)", 
 # 	)
 	
@@ -277,7 +390,8 @@ end
 # end
 
 # ╔═╡ 19b432e6-1d14-11eb-1770-fda8ed6ad743
-@testset "KMS boundary conditions" begin
+# Kubo-Martin-Schwinger boundary conditions
+M.@testset "KMS boundary conditions" begin
 	# G^R(t,t) = -i
 	# @test all(diag(GᶜG.data - GᶜL.data) .≈ -1.0im)
 	# @test all(diag(GᵞG.data - GᵞL.data) .≈ -1.0im)
@@ -314,15 +428,17 @@ end
 # 		else
 # 		println("Cannot test mixed functions BCs")
 # 	end
-end
+end;
 
 # ╔═╡ Cell order:
-# ╠═f6eb14a0-1d04-11eb-21ab-5fe40ebb915d
-# ╠═13bb1f84-1d06-11eb-306b-5bef219f7434
+# ╟─13bb1f84-1d06-11eb-306b-5bef219f7434
+# ╟─3d95b35a-5e76-11eb-3118-61d944fb7c9a
 # ╠═25249ec4-1d05-11eb-211f-17a1bb80cd03
-# ╠═376c9bfc-1d05-11eb-2f4e-331c0302a14b
-# ╠═1fb01056-1d06-11eb-241f-49b9b90929dd
-# ╠═82b3677a-1d06-11eb-1a41-c3a9b29e9995
-# ╠═aede18f0-360f-11eb-182f-0fbb1762f733
-# ╠═21e84c2a-5407-11eb-3bbf-6590b0ca21eb
-# ╠═19b432e6-1d14-11eb-1770-fda8ed6ad743
+# ╟─dfded9cc-5efe-11eb-387d-a35f79859dd8
+# ╟─376c9bfc-1d05-11eb-2f4e-331c0302a14b
+# ╟─1fb01056-1d06-11eb-241f-49b9b90929dd
+# ╟─82b3677a-1d06-11eb-1a41-c3a9b29e9995
+# ╟─834f9d50-60c9-11eb-3207-3bb56de82801
+# ╟─aede18f0-360f-11eb-182f-0fbb1762f733
+# ╟─21e84c2a-5407-11eb-3bbf-6590b0ca21eb
+# ╟─19b432e6-1d14-11eb-1770-fda8ed6ad743

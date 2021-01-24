@@ -1,5 +1,3 @@
-using NCA.FFTW
-
 function ft(xs, ys; mode=+1)
   # @assert ordered_xs
   dx = xs[2] - xs[1]
