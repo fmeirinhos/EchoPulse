@@ -21,8 +21,8 @@ end;
 
 # ╔═╡ 292f7a80-6a1e-11eb-144e-b96c3e89f430
 begin
-	EP = ingredients("../src/EchoPulse.jl")
-	import .EP.EchoPulse: PhotonAssistedModel, FrequencyData, TimeData, f_vt, f_dt, Σ_t
+	X = ingredients("../src/EchoPulse.jl")
+	import .X.EchoPulse: PhotonAssistedModel, FrequencyData, TimeData, f_vt, f_dt, Σ_t
 	
 	using KadanoffBaym
 	using LinearAlgebra: diag

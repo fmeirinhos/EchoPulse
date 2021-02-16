@@ -112,8 +112,9 @@ function TimeData(model::PhotonAssistedModel, freqs::FrequencyData; timematrix=f
     GᵇL = GreenFunction(G∞(-L[:,1]), Lesser)  
     GᵇG = GreenFunction(G∞(-G[:,1]), Greater)
 
-    # NOTE: double check these boundaries
-    t0 = sort(-ts[1+length(ts)÷2:end])
+    t0 = ts[1:length(ts)÷2]
+    @assert ts[1:2:end] ≈ t0 .- reverse(t0)
+    @assert size(t0, 1) == size(GᶠL, 1)
   else
     GᶠL = GreenFunction(+im * ones(1,1) * ∫dω(nca.data.fermi .* 2imG_t[:,2]), Lesser)
     GᶠG = GreenFunction(-im * ones(1,1), Greater)
@@ -129,7 +130,6 @@ function TimeData(model::PhotonAssistedModel, freqs::FrequencyData; timematrix=f
       GreenFunction(zero(GᵇG.data), Greater))
 
   if timematrix
-    @assert size(t0, 1) == size(GᶠL, 1)
     for t in eachindex(t0), t′ in eachindex(t0)
       Σ_t(model, data, t0, t, t′)
     end

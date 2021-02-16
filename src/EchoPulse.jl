@@ -11,6 +11,6 @@ include("utils.jl")
 include("model.jl")
 include("equations.jl")
 
-export PhotonAssistedModel
+export PhotonAssistedModel, FrequencyData, TimeData
 
 end # module
