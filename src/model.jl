@@ -59,8 +59,11 @@ end
 Data needed to solve the Kadanoff-Baym equations in the real-time contour
 """
 struct TimeData{T}
-  GᶜL#::GreenFunction{T, Array{T,2}, Lesser}
-  GᶜG#::GreenFunction{T, Array{T,2}, Greater}
+  GᶜL#::Union{Any, GreenFunction{T, Array{T,2}, Lesser}}
+  GᶜG#::Union{Any, GreenFunction{T, Array{T,2}, Greater}}
+  ρᶜ::Union{Nothing, Vector{Float64}}
+  ωᶜ::Union{Nothing, Vector{Float64}}
+
   GᶠL::GreenFunction{T, Array{T,2}, Lesser}
   GᶠG::GreenFunction{T, Array{T,2}, Greater}
   GᵇL::GreenFunction{T, Array{T,2}, Lesser}
@@ -72,39 +75,39 @@ struct TimeData{T}
   ΣᶠG::GreenFunction{T, Array{T,2}, Greater}
   ΣᵇL::GreenFunction{T, Array{T,2}, Lesser}
   ΣᵇG::GreenFunction{T, Array{T,2}, Greater}
+  TᶜL::GreenFunction{T, Array{T,2}, Lesser}
+  TᶜG::GreenFunction{T, Array{T,2}, Greater}
 end
 
-function TimeData(model::PhotonAssistedModel, freqs::FrequencyData; timematrix=false)
+function TimeData(model::PhotonAssistedModel, freqs::FrequencyData; timematrix=false, ωᶜ=nothing)
   @unpack nca, imG_t = freqs
+  @unpack mesh, data = nca
 
-  ∫dω(f) = integrate(nca.mesh.mesh, f) / (2π)
-  
-  # conduction electrons
-  ts, L_ = ft(nca.mesh, im/(2pi) * nca.data.Nc .* nca.data.fermi, mode=-1)
-  GᶜL = extrapolate(interpolate((ts,), +L_, Gridded(Linear())), 0)
-  ts, G_ = ft(nca.mesh, im/(2pi) * nca.data.Nc .* nca.data.fermi⁻, mode=-1)
-  GᶜG = extrapolate(interpolate((ts,), -G_, Gridded(Linear())), 0)
+  if !isnothing(ωᶜ)
+    GᶜL = [GreenFunction(+im * ones(1,1) .* NCA.nf.(+ω, nca.β), Lesser) for ω in ωᶜ]
+    GᶜG = [GreenFunction(-im * ones(1,1) .* NCA.nf.(-ω, nca.β), Greater) for ω in ωᶜ]
+    ρᶜ = nca.model.Nc₀.(ωᶜ) .* (ωᶜ[2] - ωᶜ[1])/(2pi)
+  else
+    # conduction electrons
+    ts, L_ = ft(mesh, im/(2pi) * data.Nc .* data.fermi, mode=-1)
+    GᶜL = extrapolate(interpolate((ts,), +L_, Gridded(Linear())), 0)
+    ts, G_ = ft(mesh, im/(2pi) * data.Nc .* data.fermi⁻, mode=-1)
+    GᶜG = extrapolate(interpolate((ts,), -G_, Gridded(Linear())), 0)
+    ρᶜ = nothing
+  end
 
-  # thz pulse
+  # thz pulse (shape s.t. ∫dt ξ(t)^2 = 1)
   @unpack ω₀, Ω, tc, Π = model
-  # Pulse shape s.t. ∫dt ξ(t)^2 = 1
   ξ(t) = (Ω^2 / (2π))^(1/4) * exp(-(t - tc)^2 * (Ω^2 / 4))
   n_ξ(t) = (Π / Ω * sqrt(2pi)) * ξ(t)^2
   GᵞL₀(T,τ) = -1im * (n_ξ(T) + 0) * exp(-im * τ * ω₀) * exp(-τ^2 * (Ω^2 / 4)/2)
   GᵞG₀(T,τ) = -1im * (n_ξ(T) + 1) * exp(-im * τ * ω₀) * exp(-τ^2 * (Ω^2 / 4)/2)
 
-  # Update auxiliary chemical potential
-  model.λ = nca.model.λ
-
   # slave-particles
   if timematrix  
     # The symmetry condition L/G(τ) = -L/G(-τ)* ⟹ L/G(ω) is purely imaginary
-    L = mapslices(imG_t, dims=1) do x
-      ft(nca.mesh, (1/pi)im * x .* nca.data.fermi; mode=-1)[2]
-    end
-    G = mapslices(imG_t, dims=1) do x
-      ft(nca.mesh, (1/pi)im * x .* nca.data.fermi⁻; mode=-1)[2]
-    end
+    L = mapslices(x -> ft(mesh, (1/pi)im * x .* data.fermi; mode=-1)[2], imG_t, dims=1)
+    G = mapslices(x -> ft(mesh, (1/pi)im * x .* data.fermi⁻; mode=-1)[2], imG_t, dims=1)
 
     GᶠL = GreenFunction(G∞(+L[:,2]), Lesser)
     GᶠG = GreenFunction(G∞(-G[:,2]), Greater)
@@ -116,16 +119,23 @@ function TimeData(model::PhotonAssistedModel, freqs::FrequencyData; timematrix=f
     @assert ts[1:2:end] ≈ t0 .- reverse(t0)
     @assert size(t0, 1) == size(GᶠL, 1)
   else
-    GᶠL = GreenFunction(+im * ones(1,1) * ∫dω(nca.data.fermi .* 2imG_t[:,2]), Lesser)
+    ∫dω(f) = integrate(mesh.mesh, f) / (2π)
+
+    GᶠL = GreenFunction(+im * ones(1,1) * ∫dω(data.fermi .* 2imG_t[:,2]), Lesser)
     GᶠG = GreenFunction(-im * ones(1,1), Greater)
 
-    GᵇL = GreenFunction(-im * ones(1,1) * ∫dω(nca.data.fermi .* 2imG_t[:,1]), Lesser) 
+    GᵇL = GreenFunction(-im * ones(1,1) * ∫dω(data.fermi .* 2imG_t[:,1]), Lesser) 
     GᵇG = GreenFunction(-im * ones(1,1), Greater)
   end
 
-  data = TimeData(GᶜL,GᶜG,GᶠL,GᶠG,GᵇL,GᵇG,GᵞL₀,GᵞG₀,
+  # Update auxiliary chemical potential
+  model.λ = nca.model.λ
+
+  data = TimeData(GᶜL,GᶜG,ρᶜ,ωᶜ,GᶠL,GᶠG,GᵇL,GᵇG,GᵞL₀,GᵞG₀,
       GreenFunction(zero(GᶠL.data), Lesser),
       GreenFunction(zero(GᶠG.data), Greater),
+      GreenFunction(zero(GᵇL.data), Lesser),
+      GreenFunction(zero(GᵇG.data), Greater),
       GreenFunction(zero(GᵇL.data), Lesser),
       GreenFunction(zero(GᵇG.data), Greater))
 

@@ -36,27 +36,44 @@ model, tmax = begin
 
 	model = PhotonAssistedModel(
 		#= SIAM parameters =#
-		V₀=sqrt(0.1),	# hybridization strength
+		V₀=sqrt(0.08),	# hybridization strength
 		ε₀f=-0.5,		# d-electron energy
-		σ=0.4,			# gaussian cdos width
+		σ=0.5,			# gaussian cdos width
 
 		#= quantum light parameters =#
-		Γ₀=sqrt(0.003), # light-matter coupling
+		Γ₀=0sqrt(0.003), # light-matter coupling
 		ω₀=1e0, 		# photon energy
-		Ω=1e-1,			# frequency bandwitdh of the gaussian pulse
+		Ω=5e-2,			# frequency bandwitdh of the gaussian pulse
 		tc=1.5e2,		# peak arrival time
 		Π=8.0e1 		# maximum photon occupation
 	)
 	
-	model, 300.0
+	model, 20.0
 end;
 
 # ╔═╡ 89141fc4-6a2c-11eb-11d4-432a71ae7968
 begin
-	ω_data = FrequencyData(model, range(-5,5,length=2^10), β);
-	t_data, t0 = TimeData(model, ω_data; timematrix=true)
+	ω_data = FrequencyData(model, range(-10,10,length=2^11), β);
+	t_data, t0 = TimeData(model, ω_data; 
+		timematrix=false, 
+		ωᶜ=collect(range(-4*model.σ,4*model.σ,length=2^8))
+	)
 	
 	@unpack GᶜL, GᶜG, GᶠL, GᶠG, GᵇL, GᵇG, GᵞL₀, GᵞG₀ = t_data
+end;
+
+# ╔═╡ 0cdaa3dc-6f7d-11eb-145d-2790c94fec9d
+begin
+	@time sol = kbsolve(
+		(_,times,t,t′) -> f_vt(model, t_data, times, t, t′),
+		(_,times,t) -> (println(times[t]); f_dt(model, t_data, times, t)),
+		# [GᶠL,GᶠG,GᵇL,GᵇG],
+		[[GᶠL,GᶠG,GᵇL,GᵇG];GᶜL;GᶜG],
+		(t0, tmax);
+		atol=1e-5, rtol=1e-2,
+		update_time =(times,t,t′)->Σ_t(model, t_data, times, t, t′))
+
+	times = sol.t
 end;
 
 # ╔═╡ fc8cca44-6a1f-11eb-28ac-a5f3445d4f56
@@ -88,7 +105,6 @@ The system will be integrated for to $(ω_to_ps(1/tmax)) ps with the light-pulse
 ###### Questions
 1. Do we need to shift the photons energy by the chemical potential?
 2. How to convert maximum photon occupation to ``MV cm^{-1}``
-3. Fix angular frequency problems: ``2\pi \omega t``
 "
 end
 
@@ -116,19 +132,6 @@ begin
 		alpha=0.3,
 		label=L"\omega_K")
 end
-
-# ╔═╡ 0cdaa3dc-6f7d-11eb-145d-2790c94fec9d
-begin
-	@time sol = kbsolve(
-		(_,times,t,t′) -> f_vt(model, t_data, times, t, t′),
-		(_,times,t) -> f_dt(model, t_data, times, t),
-		[GᶠL,GᶠG,GᵇL,GᵇG],
-		(t0, tmax);
-		atol=1e-6, rtol=1e-3,
-		update_time =(times,t,t′)->Σ_t(model, t_data, times, t, t′))
-
-	times = sol.t
-end;
 
 # ╔═╡ eda788ba-6f84-11eb-24ee-17e261d30bc1
 begin
@@ -199,12 +202,18 @@ begin
 	# savefig("ad_wigner.pdf")
 end
 
+# ╔═╡ e106c360-7069-11eb-16bd-8b4f4f5d5d9b
+plot(ω_to_ps.(inv.(times)), GᶠL.data |> imag ∘ diag;
+		label=L"n_f",
+		title=L"\textrm{Field occupations}")
+
 # ╔═╡ Cell order:
 # ╟─ed50b1fe-6a1e-11eb-08ab-95d436eef99c
 # ╠═292f7a80-6a1e-11eb-144e-b96c3e89f430
 # ╠═49afc5ac-6a24-11eb-3446-715b1b8c2eb7
-# ╟─89141fc4-6a2c-11eb-11d4-432a71ae7968
+# ╠═89141fc4-6a2c-11eb-11d4-432a71ae7968
+# ╠═0cdaa3dc-6f7d-11eb-145d-2790c94fec9d
 # ╟─fc8cca44-6a1f-11eb-28ac-a5f3445d4f56
 # ╟─56d36398-6a32-11eb-3f78-01155850c5d2
-# ╟─0cdaa3dc-6f7d-11eb-145d-2790c94fec9d
 # ╟─eda788ba-6f84-11eb-24ee-17e261d30bc1
+# ╠═e106c360-7069-11eb-16bd-8b4f4f5d5d9b
