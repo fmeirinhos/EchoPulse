@@ -67,8 +67,7 @@ begin
 	@time sol = kbsolve(
 		(_,times,t,t′) -> f_vt(model, t_data, times, t, t′),
 		(_,times,t) -> (println(times[t]); f_dt(model, t_data, times, t)),
-		# [GᶠL,GᶠG,GᵇL,GᵇG],
-		[[GᶠL,GᶠG,GᵇL,GᵇG];GᶜL;GᶜG],
+		isnothing(t_data.ωᶜ) ? [GᶠL,GᶠG,GᵇL,GᵇG] : [[GᶠL,GᶠG,GᵇL,GᵇG];GᶜL;GᶜG],
 		(t0, tmax);
 		atol=1e-5, rtol=1e-2,
 		update_time =(times,t,t′)->Σ_t(model, t_data, times, t, t′))
@@ -110,7 +109,7 @@ end
 
 # ╔═╡ 56d36398-6a32-11eb-3f78-01155850c5d2
 begin	
-	plot(ω_to_eV.(ω_data.nca.mesh.mesh), ω_data.nca.data.Nc/(2pi);
+	plot(ω_to_eV.(ω_data.nca.mesh.mesh), ω_data.nca.data.ρc;
 		label=L"$A_c$", 
 		linecolor=:green,
 		legend=:topleft,
@@ -119,7 +118,7 @@ begin
 		title=L"\textrm{Equilibrium spectral functions}"
 		)
 	
-	plot!(ω_to_eV.(ω_data.nca.mesh.mesh), ω_data.G_d |> imag,
+	plot!(ω_to_eV.(ω_data.nca.mesh.mesh), 2ω_data.G_d |> imag,
 		label=L"$A_d$",
 		linecolor=:darkorange)
 	

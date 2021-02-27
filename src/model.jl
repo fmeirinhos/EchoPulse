@@ -28,31 +28,32 @@ end
 
 function FrequencyData(model::PhotonAssistedModel, mesh::AbstractArray, β::Float64)
   # Equilibrium model
-  nca = FreqNCA(
-    model=SIAM(
-      V₀=model.V₀,
-      ε₀f=model.ε₀f,
-      Nc₀=x-> 2pi * NCA.gaussian(x, -0.0, model.σ)),
-    β=β,
-    mesh=LinearMesh(first(mesh), last(mesh), length(mesh)))
+  nca = let
+    siam = SIAM(V₀=model.V₀, ε₀f=model.ε₀f)
+    mesh = LinearMesh(first(mesh), last(mesh), length(mesh))
+    data = SIAMData(siam, mesh, β, ω -> 2π * NCA.gaussian(ω, 0.0, model.σ))
 
-  imΣ_t = let
+    FreqNCA(model=siam, mesh=mesh, data=data, β=β)
+  end;
+
+  imG_t = let
     # Initial guesses
-    x0 = abs2(nca.model.V₀) * hcat(nca.data.Nc, nca.data.Nc)
+    x0 = abs2(nca.model.V₀) * hcat(nca.data.ρc, nca.data.ρc)
 
     # Find fixed-point
-    nlsolve(x0, method=:anderson, beta=0.9, show_trace=:true) do imΣ
+    imΣ_t = nlsolve(x0, method=:anderson, beta=0.9, show_trace=:true) do imΣ
       NCA.calculate_λ!(nca, imΣ)
       NCA.slave_particle_imΣ!(nca, NCA.slave_particle_imG!(nca, imΣ)) - imΣ
     end.zero
+
+    NCA.slave_particle_imG!(nca, imΣ_t)
   end
 
-  imG_t = NCA.slave_particle_imG!(nca, imΣ_t)
-  G_d = NCA.projector(nca, imG_t)[2]
+  _, Gd = NCA.projector(nca, imG_t)
 
-  ωK = NCA.kondo_temp(nca.mesh, nca.data.Nc ./ (2pi), model.ε₀f, model.V₀)
+  ωK = NCA.kondo_temp(nca.mesh, nca.data.ρc ./ (2pi), model.ε₀f, model.V₀)
 
-  return FrequencyData(nca, imG_t, G_d, ωK)
+  return FrequencyData(nca, imG_t, Gd, ωK)
 end
 
 """
@@ -83,17 +84,25 @@ function TimeData(model::PhotonAssistedModel, freqs::FrequencyData; timematrix=f
   @unpack nca, imG_t = freqs
   @unpack mesh, data = nca
 
-  if !isnothing(ωᶜ)
-    GᶜL = [GreenFunction(+im * ones(1,1) .* NCA.nf.(+ω, nca.β), Lesser) for ω in ωᶜ]
-    GᶜG = [GreenFunction(-im * ones(1,1) .* NCA.nf.(-ω, nca.β), Greater) for ω in ωᶜ]
-    ρᶜ = nca.model.Nc₀.(ωᶜ) .* (ωᶜ[2] - ωᶜ[1])/(2pi)
-  else
-    # conduction electrons
-    ts, L_ = ft(mesh, im/(2pi) * data.Nc .* data.fermi, mode=-1)
+  if isnothing(ωᶜ)
+    # Summed many c-electron states
+    ts, L_ = ft(mesh, im / (2pi) * data.ρc .* data.fermi, mode=-1)
     GᶜL = extrapolate(interpolate((ts,), +L_, Gridded(Linear())), 0)
-    ts, G_ = ft(mesh, im/(2pi) * data.Nc .* data.fermi⁻, mode=-1)
+    ts, G_ = ft(mesh, im / (2pi) * data.ρc .* data.fermi⁻, mode=-1)
     GᶜG = extrapolate(interpolate((ts,), -G_, Gridded(Linear())), 0)
     ρᶜ = nothing
+  elseif timematrix
+    ts = ft(mesh, zero.(mesh); mode=-1)[1]
+
+    # Many c-electron states
+    GᶜL = [GreenFunction(G∞(+1.0im * NCA.nf(+ω, nca.β) .* exp.(-1.0im * ω * ts)), Lesser) for ω in ωᶜ]
+    GᶜG = [GreenFunction(G∞(-1.0im * NCA.nf(-ω, nca.β) .* exp.(-1.0im * ω * ts)), Greater) for ω in ωᶜ]
+    ρᶜ = NCA.gaussian.(ωᶜ, 0.0, model.σ) .* (ωᶜ[2] - ωᶜ[1])
+  else
+    # Many c-electron states
+    GᶜL = [GreenFunction(+1.0im * ones(1,1) * NCA.nf(+ω, nca.β), Lesser) for ω in ωᶜ]
+    GᶜG = [GreenFunction(-1.0im * ones(1,1) * NCA.nf(-ω, nca.β), Greater) for ω in ωᶜ]
+    ρᶜ = NCA.gaussian.(ωᶜ, 0.0, model.σ) .* (ωᶜ[2] - ωᶜ[1])
   end
 
   # thz pulse (shape s.t. ∫dt ξ(t)^2 = 1)
