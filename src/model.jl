@@ -1,12 +1,13 @@
 """
+    PhotonAssistedModel
+
 Parameters for the photon-assisted SIAM / PAM
 """
 Base.@kwdef mutable struct PhotonAssistedModel
   # single impurity Anderson model parameters
   V₀::Float64     # hybridization strength
   ε₀f::Float64    # f-electron ground state energy
-  λ::Float64=NaN # gauge chemical potential
-  σ::Float64      # c-electron gaussian bandwidth
+  λ::Float64=NaN  # gauge chemical potential
 
   # pulse parameters
   Γ₀::Float64     # light-matter coupling strength
@@ -17,6 +18,8 @@ Base.@kwdef mutable struct PhotonAssistedModel
 end
 
 """
+    FrequencyData
+
 Data needed to solve the Kadanoff-Baym equation in the imaginary-time contour
 """
 struct FrequencyData
@@ -27,36 +30,58 @@ struct FrequencyData
 end
 
 function FrequencyData(model::PhotonAssistedModel, mesh::AbstractArray, β::Float64)
+  # c-electrons density of states
+  dos(ω) = 2π * NCA.gaussian(ω, 0.0, 1/3) # half-bandwidth ~1
+  
   # Equilibrium model
-  nca = let
-    siam = SIAM(V₀=model.V₀, ε₀f=model.ε₀f)
-    mesh = LinearMesh(first(mesh), last(mesh), length(mesh))
-    data = SIAMData(siam, mesh, β, ω -> 2π * NCA.gaussian(ω, 0.0, model.σ))
+    nca = let
+      siam = SIAM(V₀=model.V₀, ε₀f=model.ε₀f)
+      mesh = LinearMesh(first(mesh), last(mesh), length(mesh))
+      data = SIAMData(siam, mesh, β, dos)
 
-    FreqNCA(model=siam, mesh=mesh, data=data, β=β)
-  end;
+      FreqNCA(model=siam, mesh=mesh, data=data, β=β)
+    end
 
+  # Obtain tilde spectral functions
   imG_t = let
-    # Initial guesses
-    x0 = abs2(nca.model.V₀) * hcat(nca.data.ρc, nca.data.ρc)
+    x0 = abs2(nca.model.V₀) * hcat(nca.data.ρc, nca.data.ρc) # initial guesses
 
-    # Find fixed-point
-    imΣ_t = nlsolve(x0, method=:anderson, beta=0.9, show_trace=:true) do imΣ
-      NCA.calculate_λ!(nca, imΣ)
-      NCA.slave_particle_imΣ!(nca, NCA.slave_particle_imG!(nca, imΣ)) - imΣ
+    # Solve NCA equations
+    imΣ = nlsolve(x0, method=:anderson, beta=0.9, show_trace=:true) do imΣ′
+      Σ = NCA.slave_particle_Σ!(nca, imΣ′)
+      _ = NCA.calculate_λ!(nca, imΣ′, Σ)
+      imG = NCA.slave_particle_imG!(nca, imΣ′, Σ)
+      
+      # Gc_new = let
+      #   Σc = abs2(nca.model.V₀) * NCA.projector(nca, imG)[2]
+
+      #   Gc_new = [quadgk(-pi/2, pi/2) do ε
+      #     dos(tan(ε) * imag(Σc[i]) + ωᵢ - real(Σc[i]))
+      #   end[1]/(2pi) for (i, ωᵢ) in enumerate(nca.mesh.mesh)]
+
+      #   NCA.kramerskronig(nca.mesh, Gc_new, :real) + 1.0im * Gc_new
+      # end
+      # nca.data.ρc = 2imag(Gc_new)
+      # nca.data.ρc_th½ = 2imag(Gc_new .* nca.data.th½)
+
+      imΣ = NCA.slave_particle_imΣ!(nca, imG)
+      imΣ - imΣ′
     end.zero
 
-    NCA.slave_particle_imG!(nca, imΣ_t)
+    NCA.slave_particle_imG!(nca, imΣ)
   end
 
-  _, Gd = NCA.projector(nca, imG_t)
-
-  ωK = NCA.kondo_temp(nca.mesh, nca.data.ρc ./ (2pi), model.ε₀f, model.V₀)
-
-  return FrequencyData(nca, imG_t, Gd, ωK)
+  return FrequencyData(
+    nca, 
+    imG_t, 
+    NCA.projector(nca, imG_t)[2], 
+    NCA.kondo_temp(nca.mesh, nca.data.ρc ./ (2pi), model.ε₀f, model.V₀)
+    )
 end
 
 """
+    TimeData
+
 Data needed to solve the Kadanoff-Baym equations in the real-time contour
 """
 struct TimeData{T}
@@ -84,22 +109,22 @@ function TimeData(model::PhotonAssistedModel, freqs::FrequencyData; timematrix=f
   @unpack nca, imG_t = freqs
   @unpack mesh, data = nca
 
+  # Can compute ∑ₖ Gᶜₖ(τ)
   if isnothing(ωᶜ)
-    # Summed many c-electron states
     ts, L_ = ft(mesh, im / (2pi) * data.ρc .* data.fermi, mode=-1)
     GᶜL = extrapolate(interpolate((ts,), +L_, Gridded(Linear())), 0)
     ts, G_ = ft(mesh, im / (2pi) * data.ρc .* data.fermi⁻, mode=-1)
     GᶜG = extrapolate(interpolate((ts,), -G_, Gridded(Linear())), 0)
     ρᶜ = nothing
+
+  # Consider many c-electron states
   elseif timematrix
     ts = ft(mesh, zero.(mesh); mode=-1)[1]
 
-    # Many c-electron states
     GᶜL = [GreenFunction(G∞(+1.0im * NCA.nf(+ω, nca.β) .* exp.(-1.0im * ω * ts)), Lesser) for ω in ωᶜ]
     GᶜG = [GreenFunction(G∞(-1.0im * NCA.nf(-ω, nca.β) .* exp.(-1.0im * ω * ts)), Greater) for ω in ωᶜ]
     ρᶜ = NCA.gaussian.(ωᶜ, 0.0, model.σ) .* (ωᶜ[2] - ωᶜ[1])
   else
-    # Many c-electron states
     GᶜL = [GreenFunction(+1.0im * ones(1,1) * NCA.nf(+ω, nca.β), Lesser) for ω in ωᶜ]
     GᶜG = [GreenFunction(-1.0im * ones(1,1) * NCA.nf(-ω, nca.β), Greater) for ω in ωᶜ]
     ρᶜ = NCA.gaussian.(ωᶜ, 0.0, model.σ) .* (ωᶜ[2] - ωᶜ[1])
@@ -109,14 +134,16 @@ function TimeData(model::PhotonAssistedModel, freqs::FrequencyData; timematrix=f
   @unpack ω₀, Ω, tc, Π = model
   ξ(t) = (Ω^2 / (2π))^(1/4) * exp(-(t - tc)^2 * (Ω^2 / 4))
   n_ξ(t) = (Π / Ω * sqrt(2pi)) * ξ(t)^2
-  GᵞL₀(T,τ) = -1im * (n_ξ(T) + 0) * exp(-im * τ * ω₀) * exp(-τ^2 * (Ω^2 / 4)/2)
-  GᵞG₀(T,τ) = -1im * (n_ξ(T) + 1) * exp(-im * τ * ω₀) * exp(-τ^2 * (Ω^2 / 4)/2)
+  GᵞL₀(T,τ) = -0.5im * ((n_ξ(T) + 1) * exp(+im * τ * ω₀) + n_ξ(T) * exp(-im * τ * ω₀)) * exp(-τ^2 * (Ω^2 / 4)/2)
+  GᵞG₀(T,τ) = -0.5im * ((n_ξ(T) + 1) * exp(-im * τ * ω₀) + n_ξ(T) * exp(+im * τ * ω₀)) * exp(-τ^2 * (Ω^2 / 4)/2)
+  # GᵞL₀(T,τ) = -1im * (n_ξ(T) + 0) * exp(-im * τ * ω₀) #* exp(-τ^2 * (Ω^2 / 4)/2)
+  # GᵞG₀(T,τ) = -1im * (n_ξ(T) + 1) * exp(-im * τ * ω₀) #* exp(-τ^2 * (Ω^2 / 4)/2)
 
   # slave-particles
   if timematrix  
     # The symmetry condition L/G(τ) = -L/G(-τ)* ⟹ L/G(ω) is purely imaginary
-    L = mapslices(x -> ft(mesh, (1/pi)im * x .* data.fermi; mode=-1)[2], imG_t, dims=1)
-    G = mapslices(x -> ft(mesh, (1/pi)im * x .* data.fermi⁻; mode=-1)[2], imG_t, dims=1)
+    L = mapslices(x -> ft(mesh, 1im/pi * x .* data.fermi; mode=-1)[2], imG_t, dims=1)
+    G = mapslices(x -> ft(mesh, 1im/pi * x .* data.fermi⁻; mode=-1)[2], imG_t, dims=1)
 
     GᶠL = GreenFunction(G∞(+L[:,2]), Lesser)
     GᶠG = GreenFunction(G∞(-G[:,2]), Greater)

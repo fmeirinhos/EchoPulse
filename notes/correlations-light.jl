@@ -32,31 +32,30 @@ end;
 
 # ╔═╡ 49afc5ac-6a24-11eb-3446-715b1b8c2eb7
 model, tmax = begin 
-	β  = 1.0e2  # temperature
+	β  = 5.0e2  # temperature
 
 	model = PhotonAssistedModel(
 		#= SIAM parameters =#
-		V₀=sqrt(0.08),	# hybridization strength
-		ε₀f=-0.5,		# d-electron energy
-		σ=0.5,			# gaussian cdos width
+		V₀=sqrt(0.03),	# hybridization strength
+		ε₀f=-0.3,		# d-electron energy
 
 		#= quantum light parameters =#
-		Γ₀=0sqrt(0.003), # light-matter coupling
-		ω₀=1e0, 		# photon energy
-		Ω=5e-2,			# frequency bandwitdh of the gaussian pulse
+		Γ₀=sqrt(0.005), # light-matter coupling
+		ω₀=5e-2, 		# photon energy
+		Ω=3e-2,			# frequency bandwitdh of the gaussian pulse
 		tc=1.5e2,		# peak arrival time
-		Π=8.0e1 		# maximum photon occupation
+		Π=1.0e1 		# maximum photon occupation
 	)
 	
-	model, 20.0
+	model, 300.0
 end;
 
 # ╔═╡ 89141fc4-6a2c-11eb-11d4-432a71ae7968
 begin
-	ω_data = FrequencyData(model, range(-10,10,length=2^11), β);
+	ω_data = FrequencyData(model, range(-3,3,length=2^14), β);
 	t_data, t0 = TimeData(model, ω_data; 
-		timematrix=false, 
-		ωᶜ=collect(range(-4*model.σ,4*model.σ,length=2^8))
+		# timematrix=true, 
+		# ωᶜ=collect(range(-4*model.σ,4*model.σ,length=2^8))
 	)
 	
 	@unpack GᶜL, GᶜG, GᶠL, GᶠG, GᵇL, GᵇG, GᵞL₀, GᵞG₀ = t_data
@@ -69,7 +68,7 @@ begin
 		(_,times,t) -> (println(times[t]); f_dt(model, t_data, times, t)),
 		isnothing(t_data.ωᶜ) ? [GᶠL,GᶠG,GᵇL,GᵇG] : [[GᶠL,GᶠG,GᵇL,GᵇG];GᶜL;GᶜG],
 		(t0, tmax);
-		atol=1e-5, rtol=1e-2,
+		atol=1e-6, rtol=1e-3,
 		update_time =(times,t,t′)->Σ_t(model, t_data, times, t, t′))
 
 	times = sol.t
@@ -77,18 +76,16 @@ end;
 
 # ╔═╡ fc8cca44-6a1f-11eb-28ac-a5f3445d4f56
 begin
-	cecu6_bandwidth = 2.0# eV
-	cdos_bandwidth = 6model.σ # 3σ
-	to_eV = cecu6_bandwidth / cdos_bandwidth
-	fwmh_gaussian = 2 * sqrt(2 * log(2))
-	fwmh_lorentzi = 2
+	cecu6_half_bandwidth = 2.0
+	cdos_half_bandwidth = 1
+	to_eV = cecu6_half_bandwidth / cdos_half_bandwidth
 	ω_to_eV(ω) = round(ω * to_eV , digits=3)
 	ω_to_THz(ω) = round(ω * to_eV * 2.4179893e2, digits=3)
 	ω_to_ps(ω) = round(inv(ω * to_eV * 2.4179893e2), digits=4)
 	ω_to_K(ω) = round(ω * to_eV * 1.1604518e4, digits=3)
 md"
 #### Summary
-Assuming the bandwidth of $\textrm{CeCu}_6$ to be ``\sim`` $cecu6_bandwidth ``eV``, the chosen SIAM parameters were
+Assuming the bandwidth of $\textrm{CeCu}_6$ to be ``\sim`` $(2cecu6_half_bandwidth) ``eV``, the chosen SIAM parameters were
 1. ``\varepsilon_d =`` $(ω_to_eV(model.ε₀f)) ``eV`` (``d-``orbital energy)
 2. ``V_0 =  `` $(ω_to_eV(model.V₀)) ``eV`` (hybridisation strength)
 3. ``T_K = `` $(ω_to_K(ω_data.ωK)) ``K`` (Kondo temperature: $(ω_to_ps(ω_data.ωK)) ``ps``)
@@ -109,24 +106,24 @@ end
 
 # ╔═╡ 56d36398-6a32-11eb-3f78-01155850c5d2
 begin	
-	plot(ω_to_eV.(ω_data.nca.mesh.mesh), ω_data.nca.data.ρc;
+	plot(ω_data.nca.mesh .|> ω_to_eV, ω_data.nca.data.ρc;
 		label=L"$A_c$", 
 		linecolor=:green,
 		legend=:topleft,
 		xlabel=L"\omega \quad (eV)",#L"$\omega/D$",
-		xlims=ω_to_eV.((-5.0, 5.0)),
+		xlims=extrema(ω_data.nca.mesh) .|> ω_to_eV,
 		title=L"\textrm{Equilibrium spectral functions}"
 		)
 	
-	plot!(ω_to_eV.(ω_data.nca.mesh.mesh), 2ω_data.G_d |> imag,
+	plot!(ω_data.nca.mesh .|> ω_to_eV, 2ω_data.G_d |> imag,
 		label=L"$A_d$",
 		linecolor=:darkorange)
 	
-	vline!(ω_to_eV.([model.ε₀f]);
+	vline!([model.ε₀f] .|> ω_to_eV;
 		label=L"\varepsilon_d",
 		line=(:dot, 1.0, :blue, 0.7))
 	
-	vspan!(ω_to_eV.([-ω_data.ωK/2, ω_data.ωK/2]);
+	vspan!([-ω_data.ωK/2, ω_data.ωK/2] .|> ω_to_eV;
 		fillcolor=:grey,
 		alpha=0.3,
 		label=L"\omega_K")
@@ -135,11 +132,12 @@ end
 # ╔═╡ eda788ba-6f84-11eb-24ee-17e261d30bc1
 begin
 	# Spectral function
-	ρt = +1.0im * (GᶠG.data .* conj(GᵇL.data) - GᶠL.data .* conj(GᵇG.data))
+	ρt = GᶠL.data .* conj(-GᵇG.data) - GᶠG.data .* conj(-GᵇL.data)
+	
 	ρτ, (τs, Ts) = wigner_transform_itp(ρt, times; fourier=false)
 	ρω, (ωs, Ts) = wigner_transform_itp(ρt, times; fourier=true)
 	
-	h1 = heatmap(ω_to_ps.(inv.(Ts)), ω_to_eV.(ωs), -ρω |> real;
+	h1 = heatmap(ω_to_ps.(inv.(Ts)), ωs, ρω |> imag;
 		xaxis=nothing,
 		ylabel=L"\omega \quad(eV)",#L"\omega / D",
 		# ylims=(-2.5, 2.5),
@@ -154,7 +152,7 @@ begin
 		label=nothing,
 		grid=nothing, 
 		c=:magma,
-		clims=extrema(-ρω |> real))
+		clims=extrema(ρω |> imag))
 	
 	# Occupations
 	p1 = plot(ω_to_ps.(inv.(times)), GᶠL.data |> imag ∘ diag;
@@ -201,18 +199,12 @@ begin
 	# savefig("ad_wigner.pdf")
 end
 
-# ╔═╡ e106c360-7069-11eb-16bd-8b4f4f5d5d9b
-plot(ω_to_ps.(inv.(times)), GᶠL.data |> imag ∘ diag;
-		label=L"n_f",
-		title=L"\textrm{Field occupations}")
-
 # ╔═╡ Cell order:
 # ╟─ed50b1fe-6a1e-11eb-08ab-95d436eef99c
-# ╠═292f7a80-6a1e-11eb-144e-b96c3e89f430
+# ╟─292f7a80-6a1e-11eb-144e-b96c3e89f430
 # ╠═49afc5ac-6a24-11eb-3446-715b1b8c2eb7
-# ╠═89141fc4-6a2c-11eb-11d4-432a71ae7968
-# ╠═0cdaa3dc-6f7d-11eb-145d-2790c94fec9d
+# ╟─89141fc4-6a2c-11eb-11d4-432a71ae7968
+# ╟─0cdaa3dc-6f7d-11eb-145d-2790c94fec9d
 # ╟─fc8cca44-6a1f-11eb-28ac-a5f3445d4f56
 # ╟─56d36398-6a32-11eb-3f78-01155850c5d2
 # ╟─eda788ba-6f84-11eb-24ee-17e261d30bc1
-# ╠═e106c360-7069-11eb-16bd-8b4f4f5d5d9b

@@ -43,6 +43,26 @@ function integrate(times::Vector,t1,t2,i,j,A::GreenFunction,B::Vector{<:GreenFun
   end
   return 1//2 * sign(j-i) * retval
 end
+function integrate(times::Vector,t1,t2,i,j,A::Vector{<:Function},B::GreenFunction)
+  retval = zeros(eltype(B), length(A))
+  for u in eachindex(A)
+    @inbounds @fastmath @simd for k in min(i,j):(max(i,j)-1)
+      dt = (times[k+1] - times[k])
+      retval[u] += dt * (A[u](t1,k)*B[k,t2] + A[u](t1,k+1)*B[k+1,t2])
+    end
+  end
+  return 1//2 * sign(j-i) * retval
+end
+function integrate(times::Vector,t1,t2,i,j,A::GreenFunction,B::Vector{<:Function})
+  retval = zeros(eltype(A), length(B))
+  for u in eachindex(B)
+    @inbounds @fastmath @simd for k in min(i,j):(max(i,j)-1)
+      dt = (times[k+1] - times[k])
+      retval[u] += dt * (A[t1,k]*B[u](k,t2) + A[t1,k+1]*B[u](k+1,t2))
+    end
+  end
+  return 1//2 * sign(j-i) * retval
+end
 
 """
 Fourier transformation
@@ -60,7 +80,9 @@ function ft(xs, ys; mode=+1)
 end
 
 """
-Builds a GreenFunction from
+    G∞(g; n=1)
+
+Builds a 2-time GreenFunction constant in the center-of-mass time given g(τ)
 """
 function G∞(g; n=1)
   L2 = length(g) ÷ 2

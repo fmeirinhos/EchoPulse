@@ -52,7 +52,7 @@ function f_dt(model::PhotonAssistedModel,data::TimeData,times,t)
   if isnothing(data.ωᶜ)
     return out
   else
-    @unpack GᶜL, GᶜG, TᶜL, TᶜG, ωᶜ = data
+    @unpack GᶜL, GᶜG, TᶜL, TᶜG = data
     I = -1.0im * (∫dt(TᶜG,GᶜL) - ∫dt(TᶜL,GᶜG) + ∫dt(GᶜL,TᶜG) - ∫dt(GᶜG, TᶜL))
     dGᶜL = I
     dGᶜG = I
@@ -64,11 +64,8 @@ end
 Calculates the self-energies in time
 """
 function Σ_t(model::PhotonAssistedModel,data::TimeData,times,t,t′)
-  @unpack GᶜL,GᶜG,GᶠL,GᶠG,GᵇL,GᵇG,GᵞL₀,GᵞG₀,ΣᶠL,ΣᶠG,ΣᵇL,ΣᵇG,TᶜL,TᶜG = data
+  @unpack GᶜL,GᶜG,GᶠL,GᶠG,GᵇL,GᵇG,GᵞL₀,GᵞG₀,ΣᶠL,ΣᶠG,ΣᵇL,ΣᵇG,TᶜL,TᶜG,ρᶜ = data
   @unpack V₀,Γ₀ = model
-
-  T = 1//2 * (times[t] + times[t′])
-  τ = times[t] - times[t′]
     
   if (n = size(GᶠL,2)) > size(ΣᶠL,2)
     resize!(ΣᶠL,n); resize!(ΣᶠG,n)
@@ -76,23 +73,24 @@ function Σ_t(model::PhotonAssistedModel,data::TimeData,times,t,t′)
     resize!(TᶜL,n); resize!(TᶜG,n)
   end
 
-  if isnothing(data.ωᶜ)
-    GᶜL_τ = GᶜL(τ)
-    GᶜG_τ = GᶜG(τ)
+  T = 0.5 * (times[t] + times[t′])
+  τ = times[t] - times[t′]
+
+  if isnothing(ρᶜ)
+    GᶜL_ = GᶜL(τ)
+    GᶜG_ = GᶜG(τ)
   else
-    # GᶜL_τ = sum(GᶜL[i][1,1] * data.ρᶜ[i] * exp(-im * τ * data.ωᶜ[i]) for i in eachindex(data.ρᶜ))
-    # GᶜG_τ = sum(GᶜG[i][1,1] * data.ρᶜ[i] * exp(-im * τ * data.ωᶜ[i]) for i in eachindex(data.ρᶜ))
-    GᶜL_τ = sum(GᶜL[i][t,t′] * data.ρᶜ[i] for i in eachindex(data.ρᶜ))
-    GᶜG_τ = sum(GᶜG[i][t,t′] * data.ρᶜ[i] for i in eachindex(data.ρᶜ))
+    GᶜL_ = sum(GᶜL[i][t,t′] * ρᶜ[i] for i in eachindex(ρᶜ))
+    GᶜG_ = sum(GᶜG[i][t,t′] * ρᶜ[i] for i in eachindex(ρᶜ))
   end
 
   V²L = V₀^2 + im * Γ₀^2 * (GᵞL₀(T,+τ) + GᵞG₀(T,-τ))
   V²G = V₀^2 + im * Γ₀^2 * (GᵞG₀(T,+τ) + GᵞL₀(T,-τ))
     
-  ΣᶠL[t,t′] = +1.0im * V²L * GᵇL[t,t′] * GᶜL_τ
-  ΣᶠG[t,t′] = +1.0im * V²G * GᵇG[t,t′] * GᶜG_τ
-  ΣᵇL[t,t′] = -2.0im * V²L * GᶠL[t,t′] * (-GᶜG_τ')
-  ΣᵇG[t,t′] = -2.0im * V²G * GᶠG[t,t′] * (-GᶜL_τ')
+  ΣᶠL[t,t′] = +1.0im * V²L * GᵇL[t,t′] * GᶜL_
+  ΣᶠG[t,t′] = +1.0im * V²G * GᵇG[t,t′] * GᶜG_
+  ΣᵇL[t,t′] = -2.0im * V²L * GᶠL[t,t′] * (-GᶜG_')
+  ΣᵇG[t,t′] = -2.0im * V²G * GᶠG[t,t′] * (-GᶜL_')
 
   TᶜL[t,t′] = +1.0im * V²L * GᶠL[t,t′] * GᵇG[t′,t] 
   TᶜG[t,t′] = +1.0im * V²G * GᶠG[t,t′] * GᵇL[t′,t]

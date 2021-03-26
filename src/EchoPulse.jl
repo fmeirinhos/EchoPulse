@@ -1,6 +1,6 @@
 module EchoPulse
 
-using DSP, NCA, NLsolve
+using DSP, QuadGK, NCA, NLsolve
 using DSP.FFTW, Interpolations, KadanoffBaym
 using LinearAlgebra
 using UnPack
