@@ -2,7 +2,7 @@
 Vertical stepping function in time
 i ∂ₜ G(t,t′) = ...
 """
-function f_vt(model::PhotonAssistedModel,data::TimeData,times,t,t′)
+function f_vt(model::PhotonAssistedSIAM,data::TimeData,times,t,t′)
   @unpack GᶠL,GᶠG,GᵇL,GᵇG,ΣᶠL,ΣᶠG,ΣᵇL,ΣᵇG = data
   @unpack ε₀f,λ = model
 
@@ -34,7 +34,7 @@ end
 Diagonal stepping function in time
 i (∂ₜ + ∂ₜ′) G(t,t′) = ...
 """
-function f_dt(model::PhotonAssistedModel,data::TimeData,times,t)
+function f_dt(model::PhotonAssistedSIAM,data::TimeData,times,t)
   @unpack GᶠL,GᶠG,GᵇL,GᵇG,ΣᶠL,ΣᶠG,ΣᵇL,ΣᵇG = data
 
   ∫dt(x...) = integrate(times,t,t,1,t,x...)
@@ -63,7 +63,7 @@ end
 """
 Calculates the self-energies in time
 """
-function Σ_t(model::PhotonAssistedModel,data::TimeData,times,t,t′)
+function Σ_t(model::PhotonAssistedSIAM,data::TimeData,times,t,t′)
   @unpack GᶜL,GᶜG,GᶠL,GᶠG,GᵇL,GᵇG,GᵞL₀,GᵞG₀,ΣᶠL,ΣᶠG,ΣᵇL,ΣᵇG,TᶜL,TᶜG,ρᶜ = data
   @unpack V₀,Γ₀ = model
     

@@ -1,23 +1,4 @@
 """
-    PhotonAssistedModel
-
-Parameters for the photon-assisted SIAM / PAM
-"""
-Base.@kwdef mutable struct PhotonAssistedModel
-  # single impurity Anderson model parameters
-  V₀::Float64     # hybridization strength
-  ε₀f::Float64    # f-electron ground state energy
-  λ::Float64=NaN  # gauge chemical potential
-
-  # pulse parameters
-  Γ₀::Float64     # light-matter coupling strength
-  ω₀::Float64     # light pulse energy
-  Ω::Float64      # light pulse bandwidth
-  tc::Float64     # light pulse peak time
-  Π::Float64      # light pulse max occupation
-end
-
-"""
     FrequencyData
 
 Data needed to solve the Kadanoff-Baym equation in the imaginary-time contour
@@ -29,18 +10,24 @@ struct FrequencyData
   ωK::Float64                     # Kondo frequency
 end
 
-function FrequencyData(model::PhotonAssistedModel, mesh::AbstractArray, β::Float64)
+function FrequencyData(model::PhotonAssistedSIAM, mesh::AbstractArray, β::Float64)
   # c-electrons density of states
   dos(ω) = 2π * NCA.gaussian(ω, 0.0, 1/3) # half-bandwidth ~1
   
   # Equilibrium model
-    nca = let
-      siam = SIAM(V₀=model.V₀, ε₀f=model.ε₀f)
-      mesh = LinearMesh(first(mesh), last(mesh), length(mesh))
-      data = SIAMData(siam, mesh, β, dos)
+  nca = let
+    mesh = LinearMesh(first(mesh), last(mesh), length(mesh))
 
-      FreqNCA(model=siam, mesh=mesh, data=data, β=β)
+    ρc = dos.(mesh)
+    ργ = let
+      ργ′ = mesh .* NCA.lorentzian.(mesh, +model.ω₀, model.Ω₀)
+      (2pi) * ργ′ ./ NCA.integrate(mesh, ργ′)
     end
+
+    data = PhotonAssistedNCAData(model, mesh, β, ρc, ργ)
+
+    FreqNCA(model=model, mesh=mesh, data=data, β=β)
+  end
 
   # Obtain tilde spectral functions
   imG_t = let
@@ -105,16 +92,20 @@ struct TimeData{T}
   TᶜG::GreenFunction{T, Array{T,2}, Greater}
 end
 
-function TimeData(model::PhotonAssistedModel, freqs::FrequencyData; timematrix=false, ωᶜ=nothing)
+function TimeData(model::PhotonAssistedSIAM, freqs::FrequencyData; timematrix=false, ωᶜ=nothing, n_ξ=nothing)
   @unpack nca, imG_t = freqs
   @unpack mesh, data = nca
 
   # Can compute ∑ₖ Gᶜₖ(τ)
   if isnothing(ωᶜ)
-    ts, L_ = ft(mesh, im / (2pi) * data.ρc .* data.fermi, mode=-1)
-    GᶜL = extrapolate(interpolate((ts,), +L_, Gridded(Linear())), 0)
-    ts, G_ = ft(mesh, im / (2pi) * data.ρc .* data.fermi⁻, mode=-1)
-    GᶜG = extrapolate(interpolate((ts,), -G_, Gridded(Linear())), 0)
+    GᶜL = let
+      L = ft(mesh, im / (2pi) * data.ρc .* data.fermi, mode=-1)
+      extrapolate(interpolate((L[1],), +L[2], Gridded(Linear())), 0)
+    end
+    GᶜG = let
+      G = ft(mesh, im / (2pi) * data.ρc .* data.fermi⁻, mode=-1)
+      extrapolate(interpolate((G[1],), -G[2], Gridded(Linear())), 0)
+    end
     ρᶜ = nothing
 
   # Consider many c-electron states
@@ -130,14 +121,23 @@ function TimeData(model::PhotonAssistedModel, freqs::FrequencyData; timematrix=f
     ρᶜ = NCA.gaussian.(ωᶜ, 0.0, model.σ) .* (ωᶜ[2] - ωᶜ[1])
   end
 
-  # thz pulse (shape s.t. ∫dt ξ(t)^2 = 1)
-  @unpack ω₀, Ω, tc, Π = model
-  ξ(t) = (Ω^2 / (2π))^(1/4) * exp(-(t - tc)^2 * (Ω^2 / 4))
-  n_ξ(t) = (Π / Ω * sqrt(2pi)) * ξ(t)^2
-  GᵞL₀(T,τ) = -0.5im * ((n_ξ(T) + 1) * exp(+im * τ * ω₀) + n_ξ(T) * exp(-im * τ * ω₀)) * exp(-τ^2 * (Ω^2 / 4)/2)
-  GᵞG₀(T,τ) = -0.5im * ((n_ξ(T) + 1) * exp(-im * τ * ω₀) + n_ξ(T) * exp(+im * τ * ω₀)) * exp(-τ^2 * (Ω^2 / 4)/2)
-  # GᵞL₀(T,τ) = -1im * (n_ξ(T) + 0) * exp(-im * τ * ω₀) #* exp(-τ^2 * (Ω^2 / 4)/2)
-  # GᵞG₀(T,τ) = -1im * (n_ξ(T) + 1) * exp(-im * τ * ω₀) #* exp(-τ^2 * (Ω^2 / 4)/2)
+  if isnothing(n_ξ)
+    GᵞL₀ = let
+      L = ft(mesh, -1im/(2pi) * data.ργ .* NCA.nb.(+mesh.mesh, nca.β); mode=-1)
+      L = extrapolate(interpolate((L[1],), L[2], Gridded(Linear())), 0)
+      (T, τ) -> L(τ)
+    end
+
+    GᵞG₀ = let
+      G = ft(mesh, +1im/(2pi) * data.ργ .* NCA.nb.(-mesh.mesh, nca.β); mode=-1)
+      G = extrapolate(interpolate((G[1],), G[2], Gridded(Linear())), 0)
+      (T, τ) -> G(τ)
+    end
+  else
+    @unpack ω₀, Ω₀ = model
+    GᵞL₀(T,τ) = -im * (n_ξ(T) + 0) * exp(-im * τ * ω₀) * exp(-τ^2 * (Ω₀^2 / 4)/2)
+    GᵞG₀(T,τ) = -im * (n_ξ(T) + 1) * exp(-im * τ * ω₀) * exp(-τ^2 * (Ω₀^2 / 4)/2)
+  end
 
   # slave-particles
   if timematrix  
