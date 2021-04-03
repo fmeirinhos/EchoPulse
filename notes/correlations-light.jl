@@ -32,9 +32,9 @@ end;
 
 # ╔═╡ 49afc5ac-6a24-11eb-3446-715b1b8c2eb7
 # parameters
-model, tmax = begin 
-	β  = 1.0e2  		# temperature
-
+begin
+	β  = 5.0e2  		# initial temperature
+	
 	model = PhotonAssistedSIAM(
 		# siam
 		V₀=sqrt(0.03),	# hybridization strength
@@ -46,28 +46,19 @@ model, tmax = begin
 		Ω₀=5e-2,		# frequency bandwitdh of the pulse
 	)
 	
-	# pulse shape
-	ξ, n_ξ = let
-		tc=1.5e2		# peak arrival time
-		Π=1.0e1 		# maximum photon occupation
-		
-		# pulse shape s.t. ∫dt ξ(t)^2 = 1
-		ξ(t) = (model.Ω₀^2 / (2π))^(1/4) * exp(-(t - tc)^2 * (model.Ω₀^2 / 4))
-		
-		# pulse occupation
-		n_ξ(t) = (Π / model.Ω₀ * sqrt(2π)) * ξ(t)^2
-		
-		ξ, nothing
-	end
+	# pulse parameters
+	Nᵧ=1.0e1 			# maximum photon occupation
+	T₀=1.5e2			# peak arrival time
 	
-	model, 200.0
+	# integration parameters
+	tmax = 300.0
 end;
 
 # ╔═╡ 89141fc4-6a2c-11eb-11d4-432a71ae7968
 begin
 	ω_data = FrequencyData(model, range(-3,3,length=2^13), β);
 	t_data, t0 = TimeData(model, ω_data;
-		n_ξ=n_ξ,
+		T₀=T₀, Nᵧ=Nᵧ,
 		timematrix=false, 
 		# ωᶜ=collect(range(-4*model.σ,4*model.σ,length=2^8))
 	)
@@ -108,9 +99,9 @@ and the gaussian-shaped pulse parameters were
 5. ``\omega = `` $(ω_to_THz(model.ω₀)) ``THz`` (pulse energy)
 6. ``\Omega = `` $(ω_to_THz(model.Ω₀)) ``THz``  (pulse bandwidth: $(6ω_to_ps(model.Ω₀)) ``ps``)
 7. ``\Gamma = `` $(ω_to_eV(model.Γ₀)) ``eV`` (light-matter coupling)
-8. ``\Pi = `` $(round(Π, digits=3)) ``n_\gamma`` (maximum photon-field occupation)
+8. ``N_\gamma = `` $(round(Nᵧ, digits=3)) ``n_\gamma`` (number of photons)
 
-The system will be integrated for to $(ω_to_ps(1/tmax)) ps with the light-pulse reaching its maximum at $(ω_to_ps(1/tc)) ps.
+The system will be integrated for to $(ω_to_ps(1/tmax)) ps with the light-pulse reaching its maximum at $(ω_to_ps(1/T₀)) ps.
 
 ###### Questions
 1. Do we need to shift the photons energy by the chemical potential?
@@ -529,10 +520,10 @@ end
 
 # ╔═╡ Cell order:
 # ╟─ed50b1fe-6a1e-11eb-08ab-95d436eef99c
-# ╟─292f7a80-6a1e-11eb-144e-b96c3e89f430
+# ╠═292f7a80-6a1e-11eb-144e-b96c3e89f430
 # ╠═49afc5ac-6a24-11eb-3446-715b1b8c2eb7
-# ╠═89141fc4-6a2c-11eb-11d4-432a71ae7968
-# ╟─0cdaa3dc-6f7d-11eb-145d-2790c94fec9d
+# ╟─89141fc4-6a2c-11eb-11d4-432a71ae7968
+# ╠═0cdaa3dc-6f7d-11eb-145d-2790c94fec9d
 # ╟─fc8cca44-6a1f-11eb-28ac-a5f3445d4f56
 # ╟─56d36398-6a32-11eb-3f78-01155850c5d2
 # ╟─eda788ba-6f84-11eb-24ee-17e261d30bc1

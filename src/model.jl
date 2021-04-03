@@ -20,7 +20,8 @@ function FrequencyData(model::PhotonAssistedSIAM, mesh::AbstractArray, β::Float
 
     ρc = dos.(mesh)
     ργ = let
-      ργ′ = mesh .* NCA.lorentzian.(mesh, +model.ω₀, model.Ω₀)
+      # NOTE: remove `mesh .*` for a proper comparison with the time-problem
+      ργ′ = mesh .* NCA.gaussian.(mesh, +model.ω₀, model.Ω₀)
       (2pi) * ργ′ ./ NCA.integrate(mesh, ργ′)
     end
 
@@ -92,7 +93,7 @@ struct TimeData{T}
   TᶜG::GreenFunction{T, Array{T,2}, Greater}
 end
 
-function TimeData(model::PhotonAssistedSIAM, freqs::FrequencyData; timematrix=false, ωᶜ=nothing, n_ξ=nothing)
+function TimeData(model::PhotonAssistedSIAM, freqs::FrequencyData; timematrix=false, ωᶜ=nothing, T₀=nothing, Nᵧ=nothing)
   @unpack nca, imG_t = freqs
   @unpack mesh, data = nca
 
@@ -121,26 +122,24 @@ function TimeData(model::PhotonAssistedSIAM, freqs::FrequencyData; timematrix=fa
     ρᶜ = NCA.gaussian.(ωᶜ, 0.0, model.σ) .* (ωᶜ[2] - ωᶜ[1])
   end
 
-  if isnothing(n_ξ)
-    GᵞL₀ = let
-      L = ft(mesh, -1im/(2pi) * data.ργ .* NCA.nb.(+mesh.mesh, nca.β); mode=-1)
-      L = extrapolate(interpolate((L[1],), L[2], Gridded(Linear())), 0)
-      (T, τ) -> L(τ)
-    end
+  # gaussian pulse
+  @unpack ω₀, Ω₀ = model
 
-    GᵞG₀ = let
-      G = ft(mesh, +1im/(2pi) * data.ργ .* NCA.nb.(-mesh.mesh, nca.β); mode=-1)
-      G = extrapolate(interpolate((G[1],), G[2], Gridded(Linear())), 0)
-      (T, τ) -> G(τ)
-    end
+  # pulse shape s.t. ∫dt ξ(t)^2 = 1
+  ξ(t) = (model.Ω₀^2 / (2π))^(1/4) * exp(-t^2 * (model.Ω₀^2 / 4))
+
+  if isnothing(Nᵧ)
+    Nᵧ = NCA.integrate(nca.mesh, nca.data.ργ .* nca.data.bose) / (2pi)
+    ξₜ(T) = sqrt(Ω₀/√(2pi))
   else
-    @unpack ω₀, Ω₀ = model
-    GᵞL₀(T,τ) = -im * (n_ξ(T) + 0) * exp(-im * τ * ω₀) * exp(-τ^2 * (Ω₀^2 / 4)/2)
-    GᵞG₀(T,τ) = -im * (n_ξ(T) + 1) * exp(-im * τ * ω₀) * exp(-τ^2 * (Ω₀^2 / 4)/2)
+    ξₜ(T) = ξ(T-T₀)
   end
+  
+  GᵞL₀(T,τ) = -im * ξ(τ)^2 * exp(-1.0im * ω₀ * τ) * √(2pi)/Ω₀ * (0 + Nᵧ * √(2pi)/Ω₀ * ξ(T-T₀)^2)
+  GᵞG₀(T,τ) = -im * ξ(τ)^2 * exp(-1.0im * ω₀ * τ) * √(2pi)/Ω₀ * (1 + Nᵧ * √(2pi)/Ω₀ * ξ(T-T₀)^2)
 
   # slave-particles
-  if timematrix  
+  if timematrix
     # The symmetry condition L/G(τ) = -L/G(-τ)* ⟹ L/G(ω) is purely imaginary
     L = mapslices(x -> ft(mesh, 1im/pi * x .* data.fermi; mode=-1)[2], imG_t, dims=1)
     G = mapslices(x -> ft(mesh, 1im/pi * x .* data.fermi⁻; mode=-1)[2], imG_t, dims=1)
