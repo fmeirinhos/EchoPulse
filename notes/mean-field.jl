@@ -1,5 +1,5 @@
 ### A Pluto.jl notebook ###
-# v0.12.10
+# v0.12.20
 
 using Markdown
 using InteractiveUtils
@@ -114,7 +114,7 @@ begin
 		@test ((pam0.λ - pam0.ε₀f) * pam0.b + pam0.V₀ * n0[2,1]) ≈ 0.0 atol=1e-7
 
 		# f^2 + b^2 = 1
-		@test abs2(pam0.b) + n0[2,2] - 1.0 ≈ 0.0
+		@test abs2(pam0.b) + n0[2,2] - 1.0 ≈ 0.0 atol=1e-7
 
 		# Half filling
 		@test n0[1,1] + n0[2,2] ≈ 2
@@ -158,7 +158,7 @@ end
 
 # ╔═╡ fcd5b4fa-2a4d-11eb-2b43-79699425e293
 begin
-	using DifferentialEquations: DDEProblem, DDEFunction, MethodOfSteps, QBDF
+	using DifferentialEquations: DDEProblem, DDEFunction, MethodOfSteps, QBDF, Tsit5
 	
 	# Photon occupation
 	function ξ(t; Ω=2.0,tc=5)
@@ -202,8 +202,8 @@ begin
 	
 	# Differential-Algebraic Delay Equation
 	f = DDEFunction(sbmf, mass_matrix=[1 0 0; 0 1 0; 0 0 0])
-	prob = DDEProblem(f, u0, h, (0.0, 1.0), (pam0,))
-	sol = sol = solve(prob, MethodOfSteps(QBDF()))
+	prob = DDEProblem(f, u0, h, (0.0, 10.0), (pam0,))
+	sol = solve(prob, MethodOfSteps(QBDF()))
 end
 
 # ╔═╡ Cell order:
