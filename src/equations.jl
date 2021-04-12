@@ -4,17 +4,17 @@ i ∂ₜ G(t,t′) = ...
 """
 function f_vt(model::PhotonAssistedSIAM,data::TimeData,times,t,t′)
   @unpack GᶠL,GᶠG,GᵇL,GᵇG,ΣᶠL,ΣᶠG,ΣᵇL,ΣᵇG = data
-  @unpack ε₀f,λ = model
+  @unpack ε₀f = model
 
   ∫dt(x...) = integrate(times,t,t′,x...)
 
   # pseudo fermion
-  dGᶠL = -1.0im * ((ε₀f + λ) * GᶠL[t,t′] + ∫dt(1,t,ΣᶠG,GᶠL) - ∫dt(1,t′,ΣᶠL,GᶠG))
-  dGᶠG = -1.0im * ((ε₀f + λ) * GᶠG[t,t′] + ∫dt(t′,t,ΣᶠG,GᶠG))
+  dGᶠL = -1.0im * (ε₀f * GᶠL[t,t′] + ∫dt(1,t,ΣᶠG,GᶠL) - ∫dt(1,t′,ΣᶠL,GᶠG))
+  dGᶠG = -1.0im * (ε₀f * GᶠG[t,t′] + ∫dt(t′,t,ΣᶠG,GᶠG))
   
   # slave boson
-  dGᵇL = -1.0im * (λ * GᵇL[t,t′] + ∫dt(1,t,ΣᵇG,GᵇL) - ∫dt(1,t′,ΣᵇL,GᵇG))
-  dGᵇG = -1.0im * (λ * GᵇG[t,t′] + ∫dt(t′,t,ΣᵇG,GᵇG))
+  dGᵇL = -1.0im * (∫dt(1,t,ΣᵇG,GᵇL) - ∫dt(1,t′,ΣᵇL,GᵇG))
+  dGᵇG = -1.0im * (∫dt(t′,t,ΣᵇG,GᵇG))
 
   out = [dGᶠL, dGᶠG, dGᵇL, dGᵇG]
   

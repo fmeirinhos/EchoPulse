@@ -5,65 +5,46 @@ Data needed to solve the Kadanoff-Baym equation in the imaginary-time contour
 """
 struct FrequencyData
   nca::FreqNCA
-  imG_t::Array{Float64,2}
-  G_d::Array{ComplexF64,1}
+  imG::Array{Float64,3}
+  Gᵈ::Array{ComplexF64,1}
   ωK::Float64                     # Kondo frequency
 end
 
-function FrequencyData(model::PhotonAssistedSIAM, mesh::AbstractArray, β::Float64)
-  # c-electrons density of states
-  dos(ω) = 2π * NCA.gaussian(ω, 0.0, 1/3) # half-bandwidth ~1
-  
+function FrequencyData(model::PhotonAssistedSIAM, mesh::AbstractArray, β::Float64)  
   # Equilibrium model
   nca = let
     mesh = LinearMesh(first(mesh), last(mesh), length(mesh))
 
-    ρc = dos.(mesh)
-    ργ = let
-      # NOTE: remove `mesh .*` for a proper comparison with the time-problem
-      ργ′ = mesh .* NCA.gaussian.(mesh, +model.ω₀, model.Ω₀)
-      (2pi) * ργ′ ./ NCA.integrate(mesh, ργ′)
-    end
+    ρc = 2π * NCA.gaussian.(mesh, 0.0, 1.0)
+    ργ = 2π * NCA.gaussian.(mesh, +model.ω₀, model.Ω₀)
 
-    data = PhotonAssistedNCAData(model, mesh, β, ρc, ργ)
+    data = PhotonAssistedSIAMData(mesh, β, ρc, ργ)#, ω->NCA.nf(ω,β), ω->NCA.nf(-ω,β))
 
     FreqNCA(model=model, mesh=mesh, data=data, β=β)
   end
 
-  # Obtain tilde spectral functions
-  imG_t = let
-    x0 = abs2(nca.model.V₀) * hcat(nca.data.ρc, nca.data.ρc) # initial guesses
+  # Obtain pseudo-particle Greater and Lesser functions
+  imG = let
+    x0 = cat(
+      abs2(nca.model.V₀) * hcat(-nca.data.ρc, -nca.data.ρc),
+      abs2(nca.model.V₀) * hcat(-nca.data.ρc, +nca.data.ρc),
+      dims=3) # initial guesses
 
     # Solve NCA equations
     imΣ = nlsolve(x0, method=:anderson, beta=0.9, show_trace=:true) do imΣ′
-      Σ = NCA.slave_particle_Σ!(nca, imΣ′)
-      _ = NCA.calculate_λ!(nca, imΣ′, Σ)
-      imG = NCA.slave_particle_imG!(nca, imΣ′, Σ)
-      
-      # Gc_new = let
-      #   Σc = abs2(nca.model.V₀) * NCA.projector(nca, imG)[2]
-
-      #   Gc_new = [quadgk(-pi/2, pi/2) do ε
-      #     dos(tan(ε) * imag(Σc[i]) + ωᵢ - real(Σc[i]))
-      #   end[1]/(2pi) for (i, ωᵢ) in enumerate(nca.mesh.mesh)]
-
-      #   NCA.kramerskronig(nca.mesh, Gc_new, :real) + 1.0im * Gc_new
-      # end
-      # nca.data.ρc = 2imag(Gc_new)
-      # nca.data.ρc_th½ = 2imag(Gc_new .* nca.data.th½)
-
-      imΣ = NCA.slave_particle_imΣ!(nca, imG)
+      imG = NCA.slave_particle_imG(nca, imΣ′)
+      imΣ = NCA.slave_particle_imΣ(nca, imG)
       imΣ - imΣ′
     end.zero
 
-    NCA.slave_particle_imG!(nca, imΣ)
+    NCA.slave_particle_imG(nca, imΣ)
   end
 
   return FrequencyData(
     nca, 
-    imG_t, 
-    NCA.projector(nca, imG_t)[2], 
-    NCA.kondo_temp(nca.mesh, nca.data.ρc ./ (2pi), model.ε₀f, model.V₀)
+    imG, 
+    NCA.projector(nca, imG)[2], 
+    NCA.kondo_temp(nca.mesh, nca.data.ρc ./ (2π), model.ε₀f, model.V₀)
     )
 end
 
@@ -94,17 +75,17 @@ struct TimeData{T}
 end
 
 function TimeData(model::PhotonAssistedSIAM, freqs::FrequencyData; timematrix=false, ωᶜ=nothing, T₀=nothing, Nᵧ=nothing)
-  @unpack nca, imG_t = freqs
+  @unpack nca, imG = freqs
   @unpack mesh, data = nca
 
   # Can compute ∑ₖ Gᶜₖ(τ)
   if isnothing(ωᶜ)
     GᶜL = let
-      L = ft(mesh, im / (2pi) * data.ρc .* data.fermi, mode=-1)
+      L = ft(mesh, im / (2π) * data.ρc .* data.fermi, mode=-1)
       extrapolate(interpolate((L[1],), +L[2], Gridded(Linear())), 0)
     end
     GᶜG = let
-      G = ft(mesh, im / (2pi) * data.ρc .* data.fermi⁻, mode=-1)
+      G = ft(mesh, im / (2π) * data.ρc .* data.fermi⁻, mode=-1)
       extrapolate(interpolate((G[1],), -G[2], Gridded(Linear())), 0)
     end
     ρᶜ = nothing
@@ -126,29 +107,25 @@ function TimeData(model::PhotonAssistedSIAM, freqs::FrequencyData; timematrix=fa
   @unpack ω₀, Ω₀ = model
 
   # pulse shape s.t. ∫dt ξ(t)^2 = 1
-  ξ(t) = (model.Ω₀^2 / (2π))^(1/4) * exp(-t^2 * (model.Ω₀^2 / 4))
+  ξ(t) = (Ω₀^2 / 2π)^(1/4) * exp(-t^2 * Ω₀^2 / 4)
 
-  if isnothing(Nᵧ)
-    Nᵧ = NCA.integrate(nca.mesh, nca.data.ργ .* nca.data.bose) / (2pi)
-    ξₜ(T) = sqrt(Ω₀/√(2pi))
-  else
-    ξₜ(T) = ξ(T-T₀)
-  end
-  
-  GᵞL₀(T,τ) = -im * ξ(τ)^2 * exp(-1.0im * ω₀ * τ) * √(2pi)/Ω₀ * (0 + Nᵧ * √(2pi)/Ω₀ * ξ(T-T₀)^2)
-  GᵞG₀(T,τ) = -im * ξ(τ)^2 * exp(-1.0im * ω₀ * τ) * √(2pi)/Ω₀ * (1 + Nᵧ * √(2pi)/Ω₀ * ξ(T-T₀)^2)
+  n = NCA.integrate(nca.mesh, data.ργ .* data.bose) / (2π)
+  N̄ᵧ(T) = isnothing(Nᵧ) ? n : Nᵧ * √(2π/Ω₀^2) * ξ(T-T₀)^2
+
+  GᵞL₀(T,τ) = -im * ξ(τ)^2 * exp(-1im * ω₀ * τ) * √(2π/Ω₀^2) * (0 + N̄ᵧ(T))
+  GᵞG₀(T,τ) = -im * ξ(τ)^2 * exp(-1im * ω₀ * τ) * √(2π/Ω₀^2) * (1 + N̄ᵧ(T))
 
   # slave-particles
   if timematrix
     # The symmetry condition L/G(τ) = -L/G(-τ)* ⟹ L/G(ω) is purely imaginary
-    L = mapslices(x -> ft(mesh, 1im/pi * x .* data.fermi; mode=-1)[2], imG_t, dims=1)
-    G = mapslices(x -> ft(mesh, 1im/pi * x .* data.fermi⁻; mode=-1)[2], imG_t, dims=1)
+    L = mapslices(x -> ft(mesh, 1im/2π * x; mode=-1)[2], imG[:,:,2], dims=1)
+    G = mapslices(x -> ft(mesh, 1im/2π * x; mode=-1)[2], imG[:,:,1], dims=1)
 
-    GᶠL = GreenFunction(G∞(+L[:,2]), Lesser)
-    GᶠG = GreenFunction(G∞(-G[:,2]), Greater)
+    GᶠL = GreenFunction(G∞(L[:,2]), Lesser)
+    GᶠG = GreenFunction(G∞(G[:,2]), Greater)
 
-    GᵇL = GreenFunction(G∞(-L[:,1]), Lesser)  
-    GᵇG = GreenFunction(G∞(-G[:,1]), Greater)
+    GᵇL = GreenFunction(G∞(L[:,1]), Lesser)  
+    GᵇG = GreenFunction(G∞(G[:,1]), Greater)
 
     t0 = ts[1:length(ts)÷2]
     @assert ts[1:2:end] ≈ t0 .- reverse(t0)
@@ -156,15 +133,17 @@ function TimeData(model::PhotonAssistedSIAM, freqs::FrequencyData; timematrix=fa
   else
     ∫dω(f) = integrate(mesh.mesh, f) / (2π)
 
-    GᶠL = GreenFunction(+im * ones(1,1) * ∫dω(data.fermi .* 2imG_t[:,2]), Lesser)
+    GᶠL = GreenFunction(im * ones(1,1) * ∫dω(imG[:,2,2]), Lesser)
     GᶠG = GreenFunction(-im * ones(1,1), Greater)
 
-    GᵇL = GreenFunction(-im * ones(1,1) * ∫dω(data.fermi .* 2imG_t[:,1]), Lesser) 
+    GᵇL = GreenFunction(im * ones(1,1) * ∫dω(imG[:,1,2]), Lesser) 
     GᵇG = GreenFunction(-im * ones(1,1), Greater)
-  end
 
-  # Update auxiliary chemical potential
-  model.λ = nca.model.λ
+    @assert imag(GᶠL[1,1]) >= 0.0
+    @assert imag(GᵇL[1,1]) <= 0.0
+    @assert 2imag(GᶠL[1,1]) - imag(GᵇL[1,1]) ≈ 1.0
+
+  end
 
   data = TimeData(GᶜL,GᶜG,ρᶜ,ωᶜ,GᶠL,GᶠG,GᵇL,GᵇG,GᵞL₀,GᵞG₀,
       GreenFunction(zero(GᶠL.data), Lesser),
