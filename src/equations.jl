@@ -1,86 +1,61 @@
-function f_vt(model::PhotonAssistedSIAM, data::TimeData, ts, t1, t2, T₀)
-  @unpack GᶠL, GᶠG, GᵇL, GᵇG, ΣᶠL, ΣᶠG, ΣᵇL, ΣᵇG, GᵞL, GᵞG, TᶜL, TᶜG, ΣᵞL, ΣᵞG = data
+function fv!(out, model::PhotonAssistedSIAM, data::TimeData, ts, t1, t2)
+    @unpack GfL, GfG, GbL, GbG, ΣfL, ΣfG, ΣbL, ΣbG, GcL, GcG, TcL, TcG, ωc = data
 
-  ∫dt(x...) = integrate(ts, t1, t2, x...)
+    ∫dt(x...) = integrate(ts, t1, t2, x...)
 
-  # pseudo fermion
-  dGᶠL = -1.0im * (model.ε₀f * GᶠL[t1, t2] + ∫dt(1, t1, ΣᶠG, GᶠL) - ∫dt(1, t2, ΣᶠL, GᶠG))
-  dGᶠG = -1.0im * (model.ε₀f * GᶠG[t1, t2] + ∫dt(t2, t1, ΣᶠG, GᶠG))
+    # pseudo fermion
+    out[1] = -1.0im * (model.ε₀f * GfL[t1, t2] + ∫dt(1, t1, ΣfG, GfL) - ∫dt(1, t2, ΣfL, GfG))
+    out[2] = -1.0im * (model.ε₀f * GfG[t1, t2] + ∫dt(t2, t1, ΣfG, GfG))
 
-  # slave boson
-  dGᵇL = -1.0im * (∫dt(1, t1, ΣᵇG, GᵇL) - ∫dt(1, t2, ΣᵇL, GᵇG))
-  dGᵇG = -1.0im * (∫dt(t2, t1, ΣᵇG, GᵇG))
+    # slave boson
+    out[3] = -1.0im * (∫dt(1, t1, ΣbG, GbL) - ∫dt(1, t2, ΣbL, GbG))
+    out[4] = -1.0im * (∫dt(t2, t1, ΣbG, GbG))
 
-  # laser pulse
-  h0 = 0.5im * ((T₀ - 0.5(ts[t1] + ts[t2])) * model.Ω₀^2) - (model.ω₀ + 1.0im * (ts[t1] - ts[t2]) * model.Ω₀^2)
-  dGᵞL = -1.0im * (h0 * GᵞL[t1, t2])# + ∫dt(1, t1, ΣᵞG, GᵞL) - ∫dt(1, t2, ΣᵞL, GᵞG) - ∫dt(t2, t1, ΣᵞL, GᵞL))
-  dGᵞG = -1.0im * (h0 * GᵞL[t1, t2])# + ∫dt(t2, t1, ΣᵞG, GᵞG) - ∫dt(1, t1, ΣᵞL, GᵞG) + ∫dt(1, t2, ΣᵞG, GᵞL))
+    # c-electrons
+    if !isnothing(ωc)
+        for i in eachindex(ωc)
+            out[4+i] = -1.0im * (ωc[i] * GcL[i][t1, t2] + ∫dt(1, t1, TcG, GcL[i]) - ∫dt(1, t2, TcL, GcG[i]) - ∫dt(t2, t1, TcL, GcL[i]))
+            out[4+i+length(ωc)] = -1.0im * (ωc[i] * GcG[i][t1, t2] + ∫dt(t2, t1, TcG, GcG[i]) - ∫dt(1, t1, TcL, GcG[i]) + ∫dt(1, t2, TcG, GcL[i]))
+        end
+    end
 
-  out = [dGᶠL, dGᶠG, dGᵇL, dGᵇG, dGᵞL, dGᵞG]
-
-  if isnothing(data.ωᶜ)
     return out
-  else
-    @unpack GᶜL, GᶜG, TᶜL, TᶜG, ωᶜ = data
-    dGᶜL = [-1.0im * ωᶜ[i] * GᶜL[i][t1, t2] for i in eachindex(ωᶜ)]
-    dGᶜL .-= 1.0im * (∫dt(1, t1, TᶜG, GᶜL) - ∫dt(1, t1, TᶜL, GᶜL) - ∫dt(1, t2, TᶜL, GᶜG) + ∫dt(1, t2, TᶜL, GᶜL))
-    dGᶜG = [-1.0im * ωᶜ[i] * GᶜG[i][t1, t2] for i in eachindex(ωᶜ)]
-    dGᶜG .-= 1.0im * (∫dt(1, t1, TᶜG, GᶜG) - ∫dt(1, t1, TᶜL, GᶜG) - ∫dt(1, t2, TᶜG, GᶜG) + ∫dt(1, t2, TᶜG, GᶜL))
-    return [out; dGᶜL; dGᶜG]
-  end
 end
 
-# function kernel_vt(model, data, times, t1, t2, τ)
-#   @unpack GᶠL, GᶠG, GᵇL, GᵇG, ΣᶠL, ΣᶠG, ΣᵇL, ΣᵇG = data
-#   Θ(i, j) = i >= j # Heaviside function
+function fd!(out, model::PhotonAssistedSIAM, data::TimeData, ts, t1, t2)
+    fv!(out, model, data, ts, t1, t2)
+    out .-= adjoint.(out)
+end
 
-#   k1 = Θ(t1, τ) * (ΣᶠG[t1, τ] * GᶠL[τ, t2]) - Θ(t2, τ) * (ΣᶠL[t1, τ] * GᶠG[τ, t2])
-#   k2 = Θ(τ, t2) * Θ(t1, τ) * (ΣᶠG[t1, τ] * GᶠG[τ, t2])
-#   k3 = Θ(t1, τ) * (ΣᵇG[t1, τ] * GᵇL[τ, t2]) - Θ(t2, τ) * (ΣᵇL[t1, τ] * GᵇG[τ, t2])
-#   k4 = Θ(τ, t2) * Θ(t1, τ) * (ΣᵇG[t1, τ] * GᵇG[τ, t2])
+function Σ!(model::PhotonAssistedSIAM, data::TimeData, ts, t1, t2)
+    @unpack GcL, GcG, GfL, GfG, GbL, GbG, GγL0, GγG0, ΣfL, ΣfG, ΣbL, ΣbG, TcL, TcG, ρc = data
 
-#   return [k1, k2, k3, k4]
-# end
+    if (n = size(GfL, 2)) > size(ΣfL, 2)
+        resize!(ΣfL, n)
+        resize!(ΣfG, n)
+        resize!(ΣbL, n)
+        resize!(ΣbG, n)
+        resize!(TcL, n)
+        resize!(TcG, n)
+    end
 
-"""
-Calculates the self-energies in time
-"""
-function Σ_t(model::PhotonAssistedSIAM, data::TimeData, ts, t1, t2)
-  @unpack GᶜL, GᶜG, GᶠL, GᶠG, GᵇL, GᵇG, GᵞL₀, GᵞG₀, ΣᶠL, ΣᶠG, ΣᵇL, ΣᵇG, ΣᵞL, ΣᵞG, TᶜL, TᶜG, ρᶜ = data
+    if isnothing(ρc)
+        GcL_ = GcL(ts[t1], ts[t2])
+        GcG_ = GcG(ts[t1], ts[t2])
+    else
+        GcL_ = sum(GcL[i][t1, t2] * ρc[i] for i in eachindex(ρc))
+        GcG_ = sum(GcG[i][t1, t2] * ρc[i] for i in eachindex(ρc))
 
-  if (n = size(GᶠL, 2)) > size(ΣᶠL, 2)
-    resize!(ΣᶠL, n)
-    resize!(ΣᶠG, n)
-    resize!(ΣᵇL, n)
-    resize!(ΣᵇG, n)
-    resize!(ΣᵞL, n)
-    resize!(ΣᵞG, n)
-    resize!(TᶜL, n)
-    resize!(TᶜG, n)
-  end
+        TcL[t1, t2] = +0.3im * model.V₀^2 * GfL[t1, t2] * GbG[t2, t1]
+        TcG[t1, t2] = +0.3im * model.V₀^2 * GfG[t1, t2] * GbL[t2, t1]
+    end
 
-  if isnothing(ρᶜ)
-    GᶜL_ = GᶜL(ts[t1], ts[t2])
-    GᶜG_ = GᶜG(ts[t1], ts[t2])
-  else
-    GᶜL_ = sum(GᶜL[i][t1, t2] * ρᶜ[i] for i in eachindex(ρᶜ))
-    GᶜG_ = sum(GᶜG[i][t1, t2] * ρᶜ[i] for i in eachindex(ρᶜ))
-  end
+    V²L = model.V₀^2 + im * model.Γ₀^2 * (GγL0(ts[t1], ts[t2]) + GγG0(ts[t2], ts[t1]))
+    V²G = model.V₀^2 + im * model.Γ₀^2 * (GγG0(ts[t1], ts[t2]) + GγL0(ts[t2], ts[t1]))
 
-  V²L = model.V₀^2 + im * model.Γ₀^2 * (GᵞL₀(ts[t1], ts[t2]) + GᵞG₀(ts[t2], ts[t1]))
-  V²G = model.V₀^2 + im * model.Γ₀^2 * (GᵞG₀(ts[t1], ts[t2]) + GᵞL₀(ts[t2], ts[t1]))
-
-  ΣᶠL[t1, t2] = +1.0im * V²L * GᵇL[t1, t2] * GᶜL_
-  ΣᶠG[t1, t2] = +1.0im * V²G * GᵇG[t1, t2] * GᶜG_
-  ΣᵇL[t1, t2] = -2.0im * V²L * GᶠL[t1, t2] * (-GᶜG_')
-  ΣᵇG[t1, t2] = -2.0im * V²G * GᶠG[t1, t2] * (-GᶜL_')
-
-  # ΣᵞL[t1, t2] = +2.0 * model.Γ₀^2 * (GᶜG_ * GᶠL[t1, t2] * GᵇG[t2, t1] + GᶜL_ * GᶠG[t1, t2] * GᵇL[t2, t1])
-  # ΣᵞG[t1, t2] = +2.0 * model.Γ₀^2 * (GᶜL_ * GᶠG[t1, t2] * GᵇL[t2, t1] + GᶜG_ * GᶠL[t1, t2] * GᵇG[t2, t1])
-  ΣᵞL[t1, t2] = -2.0im * model.Γ₀^2 * (GᶠL[t1, t2] * GᵇG[t2, t1] + GᶠG[t1, t2] * GᵇL[t2, t1])
-  ΣᵞG[t1, t2] = -2.0im * model.Γ₀^2 * (GᶠG[t1, t2] * GᵇL[t2, t1] + GᶠL[t1, t2] * GᵇG[t2, t1])
-
-  TᶜL[t1, t2] = +1.0im * V²L * GᶠL[t1, t2] * GᵇG[t2, t1]
-  TᶜG[t1, t2] = +1.0im * V²G * GᶠG[t1, t2] * GᵇL[t2, t1]
-  return
+    ΣfL[t1, t2] = +1.0im * V²L * GbL[t1, t2] * GcL_
+    ΣfG[t1, t2] = +1.0im * V²G * GbG[t1, t2] * GcG_
+    ΣbL[t1, t2] = -2.0im * V²L * GfL[t1, t2] * (-GcG_')
+    ΣbG[t1, t2] = -2.0im * V²G * GfG[t1, t2] * (-GcL_')
+    return
 end
