@@ -1,5 +1,5 @@
 ### A Pluto.jl notebook ###
-# v0.16.0
+# v0.16.1
 
 using Markdown
 using InteractiveUtils
@@ -31,17 +31,14 @@ end;
 # ╔═╡ 292f7a80-6a1e-11eb-144e-b96c3e89f430
 begin
     using Pkg; Pkg.activate()
-    using Revise
+	
+	using LinearAlgebra: diag
+	
+	using Revise
+	using KadanoffBaym, LangrethsRules
 	
 	EchoPulse = ingredients("../src/EchoPulse.jl").EchoPulse
 	
-    using KadanoffBaym, LangrethsRules
-
-    using LinearAlgebra: diag
-    using UnPack
-
-    using Test
-
     using Plots, LaTeXStrings
 	Plots.gr()
 end;
@@ -50,90 +47,96 @@ end;
 # parameters (units of half-bandwidth)
 begin
 	# equilibrium parameters
-	β = 4.0e3
-    ωmesh = range(-8, 8; length = 2^15)
+	β = 1.0e3
+    ωs_eq = range(-6, 6; length = 2^14 - 1)
 	
 	# model parameters
     model = EchoPulse.PhotonAssistedSIAM(
         # siam
         ;
-        V₀ = sqrt(0.080),# hybridization strength
+        V₀ = sqrt(0.083),# hybridization strength
         ε₀f = -0.4,# d-electron energy
 
         # quantum light
-        Γ₀ = sqrt(0.03),  # light-matter coupling
-        ω₀ = 1.0e-1, # photon energy
-        Ω₀ = 1.0e-0,
+        Γ₀ = sqrt(0.02),  # light-matter coupling
+        ω₀ = 1.2e-2, # photon energy
+        Ω₀ = 1.2e-1,
     )
 
     # time pulse parameters
-    Nᵧ = 1.0e1 # maximum photon occupation
-    T₀ = 5.0e1 # peak arrival time
+    Nᵧ = 1.0e0 # maximum photon occupation
+    T₀ = 4.0e2 # peak arrival time
 
     # integration parameters
-    tmax = 1.0e2
-	rtol = 1e-3    
+    tmax = 8.0e2
+	rtol = 1e-4
+	
+	# poor-man's dmft
+	dmft = false
+	
+	# solve with time-matrix initial condition
+	timematrix = false
 end;
 
 # ╔═╡ a8b39952-53d9-49b6-ada4-d7206640857a
 begin
-	nca, imG, Geq, ωK, tdata, t0 = EchoPulse.TimeData(
+	Gd_eq, Gc_eq, ωK, tdata, t0 = EchoPulse.TimeData(
         model = model,
-        mesh = ωmesh,
+        ωs = ωs_eq,
 		β = β,
         T₀ = T₀,
         Nᵧ = Nᵧ,
-        timematrix = false,
-		# ωᶜ = collect(range(-2.0, 2.0; length = 2^9))
-		ωᶜ = nothing
+        timematrix = timematrix,
+		ωc = collect(range(-3.0, 3.0; length = 2^8))
 	)
 end;
 
 # ╔═╡ fc8cca44-6a1f-11eb-28ac-a5f3445d4f56
 begin
-    cecu6_half_bandwidth = 2.0
+    cecu6_half_bandwidth = 2.0 #eV
     cdos_half_bandwidth = 3
     to_eV = cecu6_half_bandwidth / cdos_half_bandwidth
+	
     ω_to_eV(ω) = round(ω * to_eV; digits = 3)
     ω_to_THz(ω) = round(ω * to_eV * 2.4179893e2; digits = 3)
     ω_to_ps(ω) = round(inv(ω * to_eV * 2.4179893e2); digits = 4)
     ω_to_K(ω) = round(ω * to_eV * 1.1604518e4; digits = 3)
+	
     md"""
     #### Summary
-    Assuming the bandwidth of $\textrm{CeCu}_6$ to be ``\sim`` $(2cecu6_half_bandwidth) ``eV``, the chosen SIAM parameters were
+    Assuming the bandwidth of $\textrm{CeCu}_6$ to be ``\sim`` $(2cecu6_half_bandwidth) ``eV``, the  parameters are
     1. ``\varepsilon_d =`` $(ω_to_eV(model.ε₀f)) ``eV`` (``d-``orbital energy)
     2. ``V_0 =  `` $(ω_to_eV(model.V₀)) ``eV`` (hybridisation strength)
-    3. ``T_K = `` $(ω_to_K(ωK)) ``K`` (Kondo temperature: $(ω_to_ps(ωK)) ``ps``)
+    3. ``T_K = `` $(ω_to_K(ωK)) ``K``, ``\tau_K = `` $(ω_to_ps(ωK)) ``ps`` (Kondo temperature & timescale)
     4. ``T = `` $(ω_to_K(1/β))  ``K`` (system temperature)
     and the gaussian-shaped pulse parameters were
     5. ``\omega = `` $(ω_to_THz(model.ω₀)) ``THz`` (pulse energy)
-    6. ``\Omega = `` $(ω_to_THz(model.Ω₀)) ``THz``  (pulse bandwidth: $(ω_to_ps(model.Ω₀)) ``ps``)
+    6. ``\Omega = `` $(ω_to_THz(model.Ω₀)) ``THz``  (pulse bandwidth: $(ω_to_ps(model.Ω₀/6)) ``ps``)
     7. ``\Gamma = `` $(ω_to_eV(model.Γ₀)) ``eV`` (light-matter coupling)
     8. ``N_\gamma = `` $(round(Nᵧ, digits=3)) ``n_\gamma`` (number of photons)
 
-    The system will be integrated for to $(ω_to_ps(1/tmax)) ps with the light-pulse reaching its maximum at $(ω_to_ps(1/T₀)) ps.
+    The system will be integrated in the interval (0, $(ω_to_ps(inv(tmax)))) ``ps`` with the light-pulse reaching its maximum at $(ω_to_ps(inv(T₀))) ``ps``.
     """
 end
 
 # ╔═╡ 56d36398-6a32-11eb-3f78-01155850c5d2
 begin
-    ωs_plots = ωmesh # .|> ω_to_eV
-
     plot(
-        ωs_plots,
-        imag(Geq[1]);
+        ωs_eq,
+        -imag(Gc_eq);
         label = L"$A_c$",
-        linecolor = :green,
+        linecolor = :darkgreen,
         legend = :topleft,
         xlabel = L"$\omega/D$",
-        xlims = 0.75 .* extrema(ωs_plots),
+        xlims = 0.75 .* extrema(ωs_eq),
+		ylims = (0.0, Inf),
         minorticks = true,
         tick_direction = :out,
         title = L"\textrm{Equilibrium ~spectral ~functions}",
     )
 
-    plot!(ωs_plots, 
-		imag(Geq[2]); 
+		plot!(ωs_eq, 
+		-imag(Gd_eq); 
 		label = L"$A_d$", 
 		linecolor = :darkorange)
 
@@ -155,91 +158,202 @@ begin
         alpha = 0.3,
         label = L"\omega_K",
     )
+	
+	# plot!(ωs_eq,
+	# 	π * EchoPulse.gaussian.(ωs_eq, 0.0, 1.0))
+	# xlims!(-0.01, 0.01)
 end
 
 # ╔═╡ 0cdaa3dc-6f7d-11eb-145d-2790c94fec9d
 begin
 	@time ts = kbsolve!(
-		(u, ts, t1, t2) -> EchoPulse.fv!(u, model, tdata, ts, t1, t2),
-		(u, ts, t1, t2) -> EchoPulse.fd!(u, model, tdata, ts, t1, t2),
+		(x...) -> EchoPulse.fv!(x..., model, tdata, T₀),
+		(x...) -> EchoPulse.fd!(x..., model, tdata, T₀),
 		EchoPulse.initial_condition(tdata),
 		(t0, tmax);
 		atol = 1e-2 * rtol,
 		rtol = rtol,
-		dtini = 1e-10,
-		γ = 9 / 10,
-		callback = (ts, t1, t2) -> EchoPulse.Σ!(model, tdata, ts, t1, t2),
-		stop = (_, ts) -> (println(" t: $(last(ts))"); false)
+		dtini = 1e-8,
+		γ = 99 / 100,
+		callback = (x...) -> begin
+			EchoPulse.resize_Σ!(tdata)
+			EchoPulse.Σ!(x..., model, tdata)
+		end,
+		stop = (x...) -> begin
+			println(" t: $(last(x[1]))")
+			false
+		end
 		).t
 end;
 
 # ╔═╡ 06020ea7-d32d-4f06-972b-a711aab1631b
 begin
     Gd = TimeOrderedGF(
-        1.0im * tdata.GfL.data .* conj(-tdata.GbG.data),
-        1.0im * tdata.GfG.data .* conj(-tdata.GbL.data),
+        +1.0im * tdata.GfL.data .* transpose(tdata.GbG.data),
+        +1.0im * tdata.GfG.data .* transpose(tdata.GbL.data),
         ts,
     )
+	
     G0γ = TimeOrderedGF(
-        [tdata.GγL0(t1, t2) for t1 in ts, t2 in ts],
+		[tdata.GγL0(t1, t2) for t1 in ts, t2 in ts],
         [tdata.GγG0(t1, t2) for t1 in ts, t2 in ts],
         ts,
     )
+	
+	G0c = TimeOrderedGF(
+		[tdata.GcL(t1, t2) for t1 in ts, t2 in ts],
+        [tdata.GcG(t1, t2) for t1 in ts, t2 in ts],
+        ts,
+    )        
+	
+	Tc1 = model.V₀^2 * Gd
+	
+	Tc2 = +1.0im * model.Γ₀^2 * TimeOrderedGF(
+		greater(Gd) .* (greater(G0γ) + transpose(lesser(G0γ))),
+		lesser(Gd) .* (lesser(G0γ) + transpose(greater(G0γ))),
+		ts
+		)
+		
+	Gc = let		
+# 		ωc = range(-3.0, 3.0; length = 2^8)
+# 		ρc = (ωc[2] - ωc[1]) * EchoPulse.gaussian.(ωc, 0.0, 1.0)
 
-    if isnothing(tdata.ωc)
-        G0c = TimeOrderedGF(
-            [tdata.GcL(t1, t2) for t1 in ts, t2 in ts],
-            [tdata.GcG(t1, t2) for t1 in ts, t2 in ts],
-            ts,
-        )
-        Gc = G0c + (G0c ⋆ (model.V₀^2 * Gd) ⋆ G0c)
-        Tγ = TimeOrderedGF(
-            model.Γ₀^2 *
-            1.0im *
-            (lesser(Gc) .* conj(greater(Gd)) + lesser(Gd) .* conj(greater(Gc))),
-            model.Γ₀^2 *
-            1.0im *
-            (greater(Gc) .* conj(lesser(Gd)) + greater(Gd) .* conj(lesser(Gc))),
-            ts,
-        )
+# 		Gc = 0.0 * G0c
+			
+# 		Tc3 = (Tc1 + Tc2)
 
-    else
-        G0c = [
-            TimeOrderedGF(tdata.GcL[i].data, tdata.GcG[i].data, ts) for
-            i = 1:length(tdata.GcG)
-        ]
-        Gc = [G0c[i] + (G0c[i] ⋆ (model.V₀^2 * Gd) ⋆ G0c[i]) for i = 1:length(tdata.GcG)]
-        Tγ = sum(
-            TimeOrderedGF(
-                model.Γ₀^2 *
-                tdata.ρc[i] *
-                1.0im *
-                (lesser(Gc[i]) .* conj(greater(Gd)) + lesser(Gd) .* conj(greater(Gc[i]))),
-                model.Γ₀^2 *
-                tdata.ρc[i] *
-                1.0im *
-                (greater(Gc[i]) .* conj(lesser(Gd)) + greater(Gd) .* conj(lesser(Gc[i]))),
-                ts,
-            ) for i = 1:length(tdata.GcG)
-        )
-    end
+# 		for (i, ωi) in enumerate(ωc)
+# 			@show i
+# 			e = [exp(-1.0im * ωi * (t1 - t2)) * exp(-abs(t1-t2) * 0.04) for t1 in ts, t2 in ts]
+# 			G0c_ = TimeOrderedGF(
+# 				+im * EchoPulse.nf(+ωi, β) * e, 
+# 				-im * EchoPulse.nf(-ωi, β) * e, 
+# 				ts)
+
+# 			Gc += ρc[i] * (G0c_)# + G0c_ ⋆ Tc3 ⋆ G0c_)
+# 		end
+		G0c + G0c ⋆ (Tc1 + Tc2) ⋆ G0c;
+		# Gc
+	end
+	
+	Tγ = -1.0im * model.Γ₀^2 * TimeOrderedGF(
+		lesser(Gc) .* transpose(greater(Gd)) + lesser(Gd) .* transpose(greater(Gc)),
+		greater(Gc) .* transpose(lesser(Gd)) + greater(Gd) .* transpose(lesser(Gc)),
+		ts,
+	)
+
+	Gγ = G0γ + G0γ ⋆ Tγ ⋆ G0γ
+	
+	# Let's find Gc and Gγ
+# 	Gγ = fixedpoint(G0γ) do x
+# 		Tc2 = +1.0im * model.Γ₀^2 * TimeOrderedGF(
+# 			greater(Gd) .* (greater(x) + transpose(lesser(x))),
+# 			lesser(Gd) .* (lesser(x) + transpose(greater(x))),
+# 			ts
+# 			)
+		
+# 		Gc = G0c + G0c ⋆ (Tc1 + Tc2) ⋆ G0c
+		
+# 		Tγ = TimeOrderedGF(
+# 			model.Γ₀^2 * (-1.0im) *
+# 			(lesser(Gc) .* transpose(greater(Gd)) + 
+# 				lesser(Gd) .* transpose(greater(Gc))),
+# 			model.Γ₀^2 * (-1.0im) *
+# 			(greater(Gc) .* transpose(lesser(Gd)) + 
+# 				greater(Gd) .* transpose(lesser(Gc))),
+# 			ts
+# 		)
+		
+# 		Gγ = G0γ + G0γ ⋆ Tγ ⋆ G0γ
+# 	end
+    # else
+    #     G0c = [
+    #         TimeOrderedGF(tdata.GcL[i].data, tdata.GcG[i].data, ts) for
+    #         i = 1:length(tdata.GcG)
+    #     ]
+    #     Gc = [G0c[i] + (G0c[i] ⋆ (model.V₀^2 * Gd) ⋆ G0c[i]) for i = 1:length(tdata.GcG)]
+    #     Tγ = sum(
+    #         TimeOrderedGF(
+    #             model.Γ₀^2 *
+    #             tdata.ρc[i] *
+    #             1.0im *
+    #             (lesser(Gc[i]) .* conj(greater(Gd)) + lesser(Gd) .* conj(greater(Gc[i]))),
+    #             model.Γ₀^2 *
+    #             tdata.ρc[i] *
+    #             1.0im *
+    #             (greater(Gc[i]) .* conj(lesser(Gd)) + greater(Gd) .* conj(lesser(Gc[i]))),
+    #             ts,
+    #         ) for i = 1:length(tdata.GcG)
+    #     )
+    # end
+	
+	# Gγ = G0γ + (G0γ ⋆ Tγ ⋆ G0γ)
+end;
+
+# ╔═╡ 4b812591-4d50-4497-a734-c1fe0c203931
+begin
+	plot(ts, lesser(G0c) |> (-) ∘ imag ∘ diag)
+	plot!(ts, lesser(Gc) |> (-) ∘ imag ∘ diag)
+	# ylims!(-0.1, 0.1)
+end
+
+# ╔═╡ 078d1625-1c87-45dd-b692-8d8f256ad751
+let
+	x = lesser(Gγ) |> (-) ∘ imag ∘ diag
+	plot(ts[2:end], (x[2:end] .- x[1:end-1]) ./ (ts[2:end] - ts[1:end-1]))
+	# ylims!(-0.001, 0.001)
+end
+
+# ╔═╡ 2f3e4406-879f-46b1-b9ae-9edf07636950
+begin
+	plot(ts, lesser(G0γ) |> (-) ∘ imag ∘ diag)
+	plot!(ts, lesser(Gγ) |> (-) ∘ imag ∘ diag)
+	# ylims!(-0.1, 0.1)
+end
+
+# ╔═╡ ce699479-d5e7-4698-a5a2-1b87a315f3a4
+# Calculate optimal grid length
+ol = let
+	err = map(range(8length(ts) ÷ 10, 12length(ts) ÷ 10, step=1)) do y
+		map(range(first(ts), last(ts), length=y)) do x
+			minimum(abs.(ts .- x))
+		end |> x -> sum(x) / y
+	end
+	
+	length(ts)
+	# 8length(ts) ÷ 10 + argmin(err) - 1
 end;
 
 # ╔═╡ eda788ba-6f84-11eb-24ee-17e261d30bc1
 begin
     # Spectral function
-    ρt = greater(Gd) - lesser(Gd)
-
-    ρτ, (τs, Ts) = wigner_transform_itp(ρt, ts; fourier = false)
-    ρω, (ωs, Ts) = wigner_transform_itp(ρt, ts; fourier = true)
-
-    ts_plots = ts
-
+    ρtd = im * (greater(Gd) - lesser(Gd))
+	ρtc = im * (greater(Gc) - lesser(Gc))
+	ρtγ = im * (greater(G0γ)-lesser(G0γ))
+	
+	ρτd, (τs, Ts) = wigner_transform_itp(ρtd, ts; 
+		fourier = false, 
+		len=ol
+	)
+    ρωd, (ωs, Ts) = wigner_transform_itp(ρtd, ts; 
+		fourier = true, 
+		len=ol
+	)
+	ρωc, _ = wigner_transform_itp(ρtc, ts; 
+		fourier=true, 
+		len=ol
+	)
+	
+	ρτγ = wigner_transform_itp(ρtγ, ts; 
+		fourier = false, 
+		len=ol
+	)
+	
     # Spectral function
     h1 = heatmap(
         Ts,
         ωs,
-        real(ρω);
+        real(ρωd);
         title = L"A_d(\omega,T)",
         xaxis = nothing,
         ylabel = L"\omega /D",
@@ -261,7 +375,7 @@ begin
         c = :magma,
         xticks = false,
         yticks = (
-            Plots.get_colorbar_ticks(h1.subplots[1])[1] * length(ωs) / maximum(real(ρω)),
+            Plots.get_colorbar_ticks(h1.subplots[1])[1] * length(ωs) / maximum(real(ρωd)),
             Plots.get_colorbar_ticks(h1.subplots[1])[2],
         ),
 		tick_direction = :out,
@@ -278,25 +392,25 @@ begin
     #     label = nothing,
     #     grid = nothing,
     #     c = :magma,
-    #     clims = extrema(real(ρω)),
+    #     clims = extrema(real(ρωd)),
     # )
 
     # Occupations
     p1 = plot(
-        ts_plots,
+        ts,
         imag(diag(tdata.GfL.data));
         label = L"n_f",
         title = L"\textrm{Field ~occupations}",
         legend = :topleft,
-        xlims = extrema(ts_plots),
+        xlims = extrema(ts),
         minorticks = true,
         tick_direction = :out,
 		xlabel = L"T\;D"
         # minorgrid=true
     )
-    p1 = plot!(ts_plots, imag(diag(-tdata.GbL.data)); label = L"n_b")
+    p1 = plot!(ts, imag(diag(-tdata.GbL.data)); label = L"n_b")
     p1 = plot!(
-        ts_plots,
+        ts,
         imag(diag((2tdata.GfL.data - tdata.GbL.data)));
         label = L"Q",
         line = (:dot, :grey, 1),
@@ -307,12 +421,12 @@ begin
     # THz pulse
     p1 = plot!(
         twinx_,
-        ts_plots,
+        ts,
         G0γ |> (-) ∘ imag ∘ diag ∘ lesser;
         label = L"n^0_\gamma",
         line = (:green, 3.0, 0.2),
         legend = :topright,
-        xlims = extrema(ts_plots),
+        xlims = extrema(ts),
         grid = false,
         minorticks = true,
         tick_direction = :out,
@@ -322,8 +436,9 @@ begin
 
     # Kondo timescale
 	max_pulse_i = findmax(G0γ |> (-) ∘ imag ∘ diag ∘ lesser)[2]
+	max_pulse_i = isone(max_pulse_i) ? length(ts) ÷ 2 : max_pulse_i
 	
-    t_max_pulse = ts_plots[max_pulse_i]
+    t_max_pulse = ts[max_pulse_i]
     p1 = vspan!(
         twinx_,
         t_max_pulse .+ 1 / ωK .* [-0.5, +0.5];
@@ -338,40 +453,82 @@ begin
     plot(h1, p1, colorbar; layout = @layout [grid(2, 1){0.95w} a])
 end
 
-# ╔═╡ 77a2227a-915c-11eb-00d2-2dbbd3ec938e
-# Comparison of frequency *projected* solution with time solution
+# ╔═╡ dd0b2a88-4eea-4e8c-a669-0099251279d5
 begin
-    Gd_τ = let
-        f = EchoPulse.ft(ωmesh, 1im / pi * imag(Geq[2]); mode = -1)
+	τK = inv(ωK)
+	
+	Gd_τ = let
+        f = EchoPulse.ft(ωs_eq, -1im / π * imag(Gd_eq); mode = -1)
         plot(
             f[1],
             imag(f[2]);
             label = L"\mathcal{F}^{-1}_\omega\{A_d(\omega)\}(\tau)",
             xlabel = L"\tau \;D",
-            xlims = (0.25τs[1], 0.25τs[end]),
+            xlims=τK .* (-2/3, 2/3),
             legend = :topright,
             alpha = 1.0,
             ms = 1.0,
+			linecolor = :orange,
         )
     end
 
     Gd_τ = plot!(
         τs,
-        (imag ∘ diag)(reverse(-ρt; dims = 2));
-        label = L"A_d(\tau)",
+        real(ρτd[:, max_pulse_i]);
+        label = L"A_d(T_0,\tau)",
         ms = 2.0,
+		linecolor = :darkgreen
     )
 	
-	Gd_τ = plot!(
-	τs,
-	((-) ∘ imag ∘ diag)(reverse(greater(G0γ)-lesser(G0γ); dims = 2));
-	label = L"A_\gamma(\tau)",
-	ms = 2.0,
-	)
+	Gd_τ_kondo = let
+		# indices of the "Kondo peak"
+		w = 10
+		i1 = argmin(abs.(ωs_eq .+ w*ωK))
+		i2 = argmin(abs.(ωs_eq .- w*ωK))
+	
+		# Fourier transform to τ-space just the peak
+		kondo_ft = EchoPulse.ft(ωs_eq[i1:i2], -1im / π * imag(Gd_eq)[i1:i2]; 
+			mode = -1)
+	
+		Gd_τ_kondo = plot(kondo_ft[1], imag(kondo_ft[2]);
+			label = L"\mathcal{F}^{-1}_\omega\{A^{(kondo)}_d(\omega)\}(\tau)",
+			xlabel = L"\tau \;D",
+			linecolor = :orange,
+			xlims=τK .* (-2/3, 2/3)
+			)
+				
+		plot!(Gd_τ_kondo, [], [];
+			label = L"A_\gamma(T_0,\tau)",
+			linecolor=:darkblue,
+		)
+		
+		plot!(twinx(), τs, real(ρτd[:, max_pulse_i]);
+			label = L"A_\gamma(T_0,\tau)",
+			linecolor=:darkblue,
+			grid = false,
+			xaxis = nothing,
+			legend = nothing,
+			xlims=inv(ωK) .* (-2/3, 2/3)
+		)
+	end
+	
+	vspan!(Gd_τ_kondo,
+        [-τK / 2, τK / 2];
+        fillcolor = :grey,
+        alpha = 0.3,
+        label = L"\tau_K",
+    )
+	
+	plot(Gd_τ, Gd_τ_kondo; layout = grid(2, 1))
+    # savefig("equilibrium-comparison.pdf")
+end
 
+# ╔═╡ 77a2227a-915c-11eb-00d2-2dbbd3ec938e
+# Comparison of frequency *projected* solution with time solution
+begin
     Gd_ω = plot(
-        ωs_plots,
-        imag(2Geq[2]);
+        ωs_eq,
+        -imag(Gd_eq);
         label = L"A_d(\omega) \quad\textrm{(eq)}",
         xlabel = L"\omega / D",
         xlims = (ωs[1], ωs[end]),
@@ -381,11 +538,24 @@ begin
 
     Gd_ω = plot!(
         ωs,
-        real(ρω[:, max_pulse_i]);
+        0.5real(ρωd[:, max_pulse_i]);
         label = L"\mathcal{F}_\tau\{A_d(T_0,\tau)\}(\omega)",
-        linecolor = :green,
+        linecolor = :darkgreen,
     )
-
+	
+# 	photon_pulse = ((-) ∘ diag)(reverse(greater(G0γ)-lesser(G0γ); dims = 2))
+# 	photon_pulse_ωs = EchoPulse.ft(τs, photon_pulse; mode = +1)[2] |> imag
+	
+# 	Gd_ω = plot!(
+# 		twinx(),
+# 		ωs,
+# 		photon_pulse_ωs;
+# 		label = L"A_\gamma(\tau)",
+# 		ms = 2.0,
+# 		linecolor=:darkred,
+# 		xlims = (ωs[1], ωs[end])
+# 	)
+	
     Gd_ω = vline!(
         [model.ε₀f];
         label = L"\varepsilon_d",
@@ -398,26 +568,44 @@ begin
         line = (:dot, 1.0, :darkred, 0.75),
     )
 
-    Gd_ω = vspan!(
+	Gd_ω = vspan!(
         [-ωK / 2, ωK / 2];
         fillcolor = :grey,
         alpha = 0.3,
         label = L"\omega_K",
     )
-
-    plot(Gd_τ, Gd_ω; layout = grid(2, 1))
-    # savefig("equilibrium-comparison.pdf")
 end
 
-# ╔═╡ 26ade5f5-5b4e-460e-ad4a-62a842fb63b0
+# ╔═╡ 57c01461-f824-430c-846c-775fcb341e1b
 begin
-	plot(ts, G0γ + (G0γ ⋆ Tγ ⋆ G0γ) |> (-) ∘ imag ∘ diag ∘ lesser,
-		label = L"A_\gamma(T)",
-		xlabel = L"T \;D",
+	fωd, _ = wigner_transform_itp((greater(Gd) + lesser(Gd)) / 2, ts; 
+		fourier=true, 
+		len=ol
 	)
-	plot!(ts, G0γ |> (-) ∘ imag ∘ diag ∘ lesser,
-		label = L"A^0_\gamma(T)"
+	fωc, _ = wigner_transform_itp((greater(Gc) + lesser(Gc)) / 2, ts; 
+		fourier=true, 
+		len=ol
 	)
+	
+	plot(ωs, -(im * (fωd ./ ρωd)[:,max_pulse_i] .- 1/2) |> real;
+		label=L"\mathcal{F}_\tau\{f_d(T_0,\tau)\}(\omega)", 
+		linecolor=:darkorange
+	)
+	
+	plot!(ωs, -(im * (fωc ./ ρωc)[:,max_pulse_i] .- 1/2) |> real;
+		label=L"\mathcal{F}_\tau\{f_c(T_0,\tau)\}(\omega)", 
+		linecolor=:darkgreen
+	)
+
+	plot!(ωs, 1.0 ./ (exp.(β .* ωs) .+ 1); 
+    		label=L"f_{eq}(\omega)", 
+    		xlabel=L"\omega / D",
+			xlims=(ωs[1], ωs[end]),
+    		legend=:topright,
+    		line=(:dot, :grey)
+	)
+	
+	xlims!(-0.1,0.1)		
 end
 
 # ╔═╡ 0483ff48-915c-11eb-12f7-fb5549cf4d66
@@ -601,22 +789,6 @@ end
 #     plot(ΣᵇLτ, ΣᵇGτ, ΣᶠLτ, ΣᶠGτ; layout = @layout [a b; c d])
 # end
 
-# ╔═╡ 7543c1d5-1d72-49de-bfae-396facea15a4
-# begin
-#     	fω, __ = wigner_transform_itp(0.5 * (tdata.GfG.data .* conj(-tdata.GbL.data) + tdata.GfL.data .* conj(-tdata.GbG.data)), ts; fourier=true)
-
-#     	fω = plot(ωs, imag(fω[:,length(ts) ÷ 2]) ./ real(ρω[:,length(ts) ÷ 2]) .+ 0.5;
-#     		label=L"\mathcal{F}_\tau\{f(T_0,\tau)\}(\omega)", 
-#     		linecolor=:darkblue
-#     	)
-
-#     	fω = plot!(ωs_plots, 1.0 ./ (exp.(β .* ωs_plots) .+ 1); 
-#     		label=L"f_{eq}(\omega)", 
-#     		xlabel=L"\omega / D", xlims=(ωs[1], ωs[end]),
-#     		legend=:topright,
-#     		linecolor=:darkorange)
-# end
-
 # ╔═╡ b7e0f8bc-907a-11eb-21b3-f9471bb006fb
 # begin
 #     function plotter(t)
@@ -747,18 +919,22 @@ end
 
 # ╔═╡ Cell order:
 # ╟─ed50b1fe-6a1e-11eb-08ab-95d436eef99c
-# ╟─292f7a80-6a1e-11eb-144e-b96c3e89f430
+# ╠═292f7a80-6a1e-11eb-144e-b96c3e89f430
 # ╠═49afc5ac-6a24-11eb-3446-715b1b8c2eb7
 # ╟─a8b39952-53d9-49b6-ada4-d7206640857a
 # ╟─fc8cca44-6a1f-11eb-28ac-a5f3445d4f56
 # ╟─56d36398-6a32-11eb-3f78-01155850c5d2
 # ╟─0cdaa3dc-6f7d-11eb-145d-2790c94fec9d
-# ╟─06020ea7-d32d-4f06-972b-a711aab1631b
+# ╠═06020ea7-d32d-4f06-972b-a711aab1631b
+# ╠═4b812591-4d50-4497-a734-c1fe0c203931
+# ╠═078d1625-1c87-45dd-b692-8d8f256ad751
+# ╠═2f3e4406-879f-46b1-b9ae-9edf07636950
+# ╟─ce699479-d5e7-4698-a5a2-1b87a315f3a4
 # ╟─eda788ba-6f84-11eb-24ee-17e261d30bc1
+# ╟─dd0b2a88-4eea-4e8c-a669-0099251279d5
 # ╟─77a2227a-915c-11eb-00d2-2dbbd3ec938e
-# ╟─26ade5f5-5b4e-460e-ad4a-62a842fb63b0
+# ╟─57c01461-f824-430c-846c-775fcb341e1b
 # ╟─0483ff48-915c-11eb-12f7-fb5549cf4d66
 # ╟─afbf57c4-915f-11eb-02ec-a5e41732d549
-# ╟─7543c1d5-1d72-49de-bfae-396facea15a4
 # ╟─b7e0f8bc-907a-11eb-21b3-f9471bb006fb
 # ╟─9a788356-912b-11eb-0356-35fb2d865d0b

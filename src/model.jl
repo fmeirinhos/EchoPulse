@@ -1,4 +1,23 @@
 """
+Photon assisted single impurity Anderson Model
+"""
+struct PhotonAssistedSIAM{T<:AbstractFloat}
+  # physical parameters
+  V₀::T     # Hybridization strength
+  ε₀f::T    # F-electron ground state e
+  μ::T      # Chemical potential
+
+  ω₀::T     # Photon frequency
+  Ω₀::T     # Photon width
+  Γ₀::T     # Photon hybridization strength
+
+  function PhotonAssistedSIAM(; V₀, ε₀f, ω₀, Ω₀, Γ₀, μ=0.0)
+    t = promote(V₀, ε₀f, μ, ω₀, Ω₀, Γ₀)
+    return new{eltype(t)}(t...)
+  end
+end
+
+"""
     TimeData
 
 Data needed to solve the Kadanoff-Baym equations in the real-time contour
@@ -6,8 +25,8 @@ Data needed to solve the Kadanoff-Baym equations in the real-time contour
 struct TimeData{T}
     GcL::Any
     GcG::Any
-    ρc::Union{Nothing,Vector{Float64}}
-    ωc::Union{Nothing,Vector{Float64}}
+    dos_c::Union{Nothing,Vector{Float64}}
+    ωc::Vector{Float64}
 
     GfL::GreenFunction{T,2,Array{T,2},SkewHermitian}
     GfG::GreenFunction{T,2,Array{T,2},SkewHermitian}
@@ -24,166 +43,158 @@ struct TimeData{T}
     ΣbG::GreenFunction{T,2,Array{T,2},SkewHermitian}
     TcL::GreenFunction{T,2,Array{T,2},SkewHermitian}
     TcG::GreenFunction{T,2,Array{T,2},SkewHermitian}
+    TγL::GreenFunction{T,2,Array{T,2},SkewHermitian}
+    TγG::GreenFunction{T,2,Array{T,2},SkewHermitian}
 end
 
-function TimeData(; model::PhotonAssistedSIAM, mesh, β, timematrix, ωᶜ, T₀, Nᵧ)
-    # Solve the problem in equilibrium
-    nca = let
-        mesh = LinearMesh(first(mesh), last(mesh), length(mesh))
-
+"""
+"""
+function TimeData(; model::PhotonAssistedSIAM, ωs, β, T₀, Nᵧ, ωc, dmft, timematrix)
+    # Calculate ρc>(t) and ρc<(t) from ρc(ω) = ∑k Gc(k; ω)
+    ρcL, ρcG = let
         # c-electron density of states
-        ρc = 2π * gaussian.(mesh, 0.0, 1.0)
+        dos_c(ω) = 2π * gaussian(ω, 0.0, 1.0)
 
-        # photon density of states
-        ργ = 2π * gaussian.(mesh, +model.ω₀, model.Ω₀)
+        η = 0.05 # Artificial damping solves a weird behaviour at large `τ` after summing all frequencies
+        ρc = -1/π * integrate(ωc, dos_c.(ωc) .* (ε -> -η ./ ((ωs .- ε).^2 .+ η^2)).(ωc))
 
-        FreqNCA(; 
-            model = PhotonAssistedSIAM(
-                V₀ = model.V₀,
-                ε₀f = model.ε₀f,
-                Γ₀ = zero(model.Γ₀),
-                ω₀ = model.ω₀,
-                Ω₀ = model.Ω₀),
-            mesh = mesh, 
-            data = PhotonAssistedSIAMData(mesh, β, ρc, ργ), 
-            β = β)
+        ρcL = ft(ωs, +im / (2π) * ρc .* nf.(+ωs, β); mode = -1)[2]
+        ρcG = ft(ωs, -im / (2π) * ρc .* nf.(-ωs, β); mode = -1)[2]
+
+        ρcL, ρcG
     end
+    
+    # Calculate ργ>(t) and ργ<(t)
+    GγL, GγG = let
+        # photon density of states
+        dos_γ(ω) = 2π * gaussian(ω, +model.ω₀, model.Ω₀)
+
+        # Initially the photon field is *NOT* occupied
+        GγL = ft(ωs, -0im / (2π) * dos_γ.(ωs); mode = -1)[2]
+        GγG = ft(ωs, -1im / (2π) * dos_γ.(ωs); mode = -1)[2]
+
+        GγL, GγG
+    end
+
+    ts = ft(ωs, ωs; mode= -1)[1]
+    Θt = (t -> t > 0 ? 1 : t == 0 ? 0.5 : 0.0).(ts) # Heaviside magic
 
     # Obtain pseudo-particle Greater and Lesser functions in equilibrium
-    imG = let
-        # initial guesses
-        x0 = cat(
-            abs2(nca.model.V₀) * hcat(-nca.data.ρc, -nca.data.ρc),
-            abs2(nca.model.V₀) * hcat(-nca.data.ρc, +nca.data.ρc);
-            dims = 3,
-        )
+    GG, GL, Gd, Gc = let
+        ρc = ρcG - ρcL
 
         # Solve NCA equations
-        imΣ = fixed_point(x0) do imΣ′
-            imG = NCA.slave_particle_imG(nca, imΣ′)
-            imΣ = NCA.slave_particle_imΣ(nca, imG)
+        Σt, success = fixed_point(hcat(ρc, ρc, ρc, -ρc)) do Σt
+            # Σ>(t) –> ΣR(ω) & Σ<(t) –> Σ<(ω)
+            ΣR = mapslices(x -> ft(ts, x .* Θt; mode = +1)[2], Σt[:,1:2]; dims = 1)
+            ΣL = mapslices(x -> ft(ts, x; mode = +1)[2], Σt[:,3:4]; dims = 1)   
 
-            # poor-man's DMFT
-            if !isnothing(ωᶜ)
-                nca.data.ρc = let
-                  @show NCA.integrate(nca.mesh, nca.data.ρc)
-                    
-                  # Interpolate into a coarser mesh
-                  Σc = 0.3 * nca.model.V₀^2 * NCA.projector(nca, imG)[2]
-                  Σc_itp = interpolate((nca.mesh.mesh, ), Σc, Gridded(Linear()))
-                  mesh_, Σc_ = sample_function(Σc_itp, range(nca.mesh[1], nca.mesh[end], length=8); tol=1e-3)
-                    
-                  g = similar(Σc_)
+            GR, GL = calculate_Gω(ωs, model, ΣR, ΣL)
 
-                  for (i, ωᵢ) in enumerate(mesh_)
-                      g[i] = quadgk(ε -> gaussian(tan(ε) * imag(Σc_[i]) + ωᵢ - real(Σc_[i]), 0.0, 1.0), -pi / 2, pi / 2)[1]
-                  end
+            # GR(ω) –> G>(t) & G<(ω) –> G<(t)
+            GG = mapslices(x -> ft(ωs, im / 1π * imag(x); mode = -1)[2], GR; dims=1)
+            GL = mapslices(x -> ft(ωs, im / 2π * imag(x); mode = -1)[2], GL; dims=1)
 
-                  # Interpolate into the nca mesh
-                  itp = interpolate((mesh_, ), 2g, Gridded(Linear()))
-                  g = itp.(nca.mesh.mesh)
-                end
-            end
+            Σt′ = calculate_Σt(model, ρcG, ρcL, GγG, GγL, GG, GL)
             
-            return imΣ
+            return Σt′
         end
 
-        NCA.slave_particle_imG(nca, imΣ)
+        @assert success "Failed to converge"
+
+        ΣR = mapslices(x -> ft(ts, x .* Θt; mode = +1)[2], Σt[:,1:2]; dims = 1)
+        ΣL = mapslices(x -> ft(ts, x; mode = +1)[2], Σt[:,3:4]; dims = 1)
+        
+        GR, GL = calculate_Gω(ωs, model, ΣR, ΣL)
+        
+        GG = mapslices(x -> ft(ωs, im / 1π * imag(x); mode = -1)[2], GR; dims = 1)
+        GL = mapslices(x -> ft(ωs, im / 2π * imag(x); mode = -1)[2], GL; dims = 1)
+        
+        GdR = ft(ts, (@. +im * (GG[:,2] * ~GL[:,1] - GL[:,2] * ~GG[:,1]) * Θt); mode=+1)[2]
+
+        TcR = abs2(model.V₀) * GdR
+        ρ0cR = ft(ts, ρc .* Θt; mode=+1)[2]
+
+        GG, GL, GdR, ρ0cR + ρ0cR .* TcR .* ρ0cR
     end
 
-    @unpack mesh, data = nca
+    # Kondo temperature estimation
+    ρω0 = -1/(2π) * imag(integrate(ts, ρcG - ρcL))
+    ωK = exp(model.ε₀f / (2 * abs2(model.V₀) * ρω0))
 
-    # Can compute ∑ₖ Gᶜₖ(τ)
-    if isnothing(ωᶜ)
+    if !dmft
         GᶜL = let
-            L = ft(mesh, im / (2π) * data.ρc .* data.fermi; mode = -1)
-            itp = extrapolate(interpolate((L[1],), +L[2], Gridded(Linear())), 0)
+            itp = extrapolate(interpolate((ts,), ρcL, Gridded(Linear())), 0)
             (t, t′) -> itp(t - t′)
         end
         GᶜG = let
-            G = ft(mesh, im / (2π) * data.ρc .* data.fermi⁻; mode = -1)
-            itp = extrapolate(interpolate((G[1],), -G[2], Gridded(Linear())), 0)
+            itp = extrapolate(interpolate((ts,), ρcG, Gridded(Linear())), 0)
             (t, t′) -> itp(t - t′)
         end
-        ρᶜ = nothing
-
-        # Consider many c-electron states
+        dos_c = nothing
     elseif timematrix
-        ts = ft(mesh, zero.(mesh); mode = -1)[1]
-
-        GᶜL = [GreenFunction(G∞(+1.0im * nf(+ω, nca.β) .* exp.(-1.0im * ω * ts)), SkewHermitian) for ω in ωᶜ]
-        GᶜG = [GreenFunction(G∞(-1.0im * nf(-ω, nca.β) .* exp.(-1.0im * ω * ts)), SkewHermitian) for ω in ωᶜ]
-        ρᶜ = gaussian.(ωᶜ, 0.0, 1.0) .* (ωᶜ[2] - ωᶜ[1])
+        @assert false "unsupported"
     else
-        # Σᶜ = nca.model.V₀^2 * NCA.projector(nca, imG)[2]
-        GᶜL = [GreenFunction(+1.0im * ones(1, 1) * nf(+ω, nca.β), SkewHermitian) for ω in ωᶜ]
-        GᶜG = [GreenFunction(-1.0im * ones(1, 1) * nf(-ω, nca.β), SkewHermitian) for ω in ωᶜ]
-        # GᶜL = [GreenFunction(+1.0im * ones(1, 1) * NCA.integrate(nca.mesh, nca.data.fermi .* imag(inv.(nca.mesh.mesh .- ω .- Σᶜ)))/pi, SkewHermitian) for ω in ωᶜ]
-        # GᶜG = [GreenFunction(-1.0im * ones(1, 1) * NCA.integrate(nca.mesh, nca.data.fermi⁻ .* imag(inv.(nca.mesh.mesh .- ω .- Σᶜ)))/pi, SkewHermitian) for ω in ωᶜ]
-        ρᶜ = gaussian.(ωᶜ, 0.0, 1.0) .* (ωᶜ[2] - ωᶜ[1])
+        GᶜL = [GreenFunction(+im * ones(1, 1) * nf(+ω, nca.β), SkewHermitian) for ω in ωc]
+        GᶜG = [GreenFunction(-im * ones(1, 1) * nf(-ω, nca.β), SkewHermitian) for ω in ωc]
+
+        dos_c = (ωc[2] - ωc[1]) .* gaussian.(ωc, 0.0, 1.0)
     end
 
     # gaussian pulse
     @unpack ω₀, Ω₀ = model
 
-    # pulse shape s.t. ∫dt ξ(t)^2 = 1
-    ξ(t) = (Ω₀^2 / 2π)^(1 / 4) * exp(-t^2 * Ω₀^2 / 4)
+    N̄ᵧ(T) = Nᵧ * √(2π / Ω₀^2) * gaussian(T, T₀, inv(Ω₀))
+    GᵞL₀(t, t′) = -im * (0 + N̄ᵧ(0.5(t + t′))) * exp(-1im * ω₀ * (t - t′)) * gaussian(t - t′, 0, inv(Ω₀)) * √(2π / Ω₀^2)
+    GᵞG₀(t, t′) = -im * (1 + N̄ᵧ(0.5(t + t′))) * exp(-1im * ω₀ * (t - t′)) * gaussian(t - t′, 0, inv(Ω₀)) * √(2π / Ω₀^2)
 
-    n = integrate(mesh.mesh, data.ργ .* data.bose) / (2π)
-    N̄ᵧ(T) = isnothing(Nᵧ) ? n : Nᵧ * √(2π / Ω₀^2) * ξ(T - T₀)^2
-
-    GᵞL₀(t, t′) = -im * ξ(t - t′)^2 * exp(-1im * ω₀ * (t - t′)) * √(2π / Ω₀^2) * (0 + N̄ᵧ(0.5(t + t′)))
-    GᵞG₀(t, t′) = -im * ξ(t - t′)^2 * exp(-1im * ω₀ * (t - t′)) * √(2π / Ω₀^2) * (1 + N̄ᵧ(0.5(t + t′)))
-
-    GᵞL = GreenFunction(GᵞL₀(0.0, 0.0) * ones(1, 1), SkewHermitian)
-    GᵞG = GreenFunction(GᵞG₀(0.0, 0.0) * ones(1, 1), SkewHermitian)
+    GγL = GreenFunction(GᵞL₀(0.0, 0.0) * ones(1, 1), SkewHermitian)
+    GγG = GreenFunction(GᵞG₀(0.0, 0.0) * ones(1, 1), SkewHermitian)
 
     # slave-particles
-    Q = integrate(mesh.mesh, -imG[:, 1, 2] + 2imG[:, 2, 2]) / 2π
-
     if timematrix
-        ts = ft(mesh, zero.(mesh); mode = -1)[1]
+        # Trim the time-grid to contain 2 Kondo time-scale. Looks like 4 timescales but G∞ will "chop" it in half
+        τK = inv(ωK)
+        r = argmin(abs.(ts .+ 2τK)):argmin(abs.(ts .- 2τK))
 
-        # The symmetry condition L/G(τ) = -L/G(-τ)* ⟹ L/G(ω) is purely imaginary
-        L = mapslices(x -> ft(mesh, 1im / 2π * x; mode = -1)[2], imG[:, :, 2] / Q; dims = 1)
-        G = mapslices(x -> ft(mesh, 1im / 2π * x; mode = -1)[2], imG[:, :, 1]; dims = 1)
+        GᶠL = GreenFunction(G∞(GL[r, 2]), SkewHermitian)
+        GᶠG = GreenFunction(G∞(GG[r, 2]), SkewHermitian)
 
-        GᶠL = GreenFunction(G∞(L[:, 2]), SkewHermitian)
-        GᶠG = GreenFunction(G∞(G[:, 2]), SkewHermitian)
+        GᵇL = GreenFunction(G∞(GL[r, 1]), SkewHermitian)
+        GᵇG = GreenFunction(G∞(GG[r, 1]), SkewHermitian)
 
-        GᵇL = GreenFunction(G∞(L[:, 1]), SkewHermitian)
-        GᵇG = GreenFunction(G∞(G[:, 1]), SkewHermitian)
-
-        t0 = ts[1:(length(ts)÷2)]
-        @assert ts[1:2:end] ≈ t0 .- reverse(t0)
-        @assert size(t0, 1) == size(GᶠL, 1)
+        # initial time-grid
+        L = size(GᶠL, 1)
+        t0 = ts[1:L] .- ts[L] # (equidistant)
     else
-        ∫dω(f) = integrate(mesh.mesh, f) / (2π)
-
-        GᶠL = GreenFunction(im * ones(1, 1) * ∫dω(imG[:, 2, 2]) / Q, SkewHermitian)
+        i0 = length(ts) ÷ 2 + 1
+        GᶠL = GreenFunction(GL[i0, 2] * ones(1, 1), SkewHermitian)
         GᶠG = GreenFunction(-im * ones(1, 1), SkewHermitian)
 
-        GᵇL = GreenFunction(im * ones(1, 1) * ∫dω(imG[:, 1, 2]) / Q, SkewHermitian)
+        GᵇL = GreenFunction(GL[i0, 1] * ones(1, 1), SkewHermitian)
         GᵇG = GreenFunction(-im * ones(1, 1), SkewHermitian)
 
-        @assert imag(GᶠL[1, 1]) >= 0.0
         @assert imag(GᵇL[1, 1]) <= 0.0
-        @assert 2imag(GᶠL[1, 1]) - imag(GᵇL[1, 1]) ≈ 1.0
+        @assert imag(GᶠL[1, 1]) >= 0.0
+        @assert -imag(GᵇL[1, 1]) + 2imag(GᶠL[1, 1]) ≈ 1.0
         @assert GᶠG[1, 1] == -im
         @assert GᵇG[1, 1] == -im
+
+        # initial time-grid
+        t0 = [0.0]
     end
 
     data = TimeData(
         GᶜL,
         GᶜG,
-        ρᶜ,
-        ωᶜ,
+        dos_c,
+        ωc,
         GᶠL,
         GᶠG,
         GᵇL,
         GᵇG,
-        GᵞL,
-        GᵞG,
+        GγL,
+        GγG,
         GᵞL₀,
         GᵞG₀,
         GreenFunction(zero(GᶠL.data), SkewHermitian),
@@ -192,26 +203,13 @@ function TimeData(; model::PhotonAssistedSIAM, mesh, β, timematrix, ωᶜ, T₀
         GreenFunction(zero(GᵇG.data), SkewHermitian),
         GreenFunction(zero(GᵇL.data), SkewHermitian),
         GreenFunction(zero(GᵇG.data), SkewHermitian),
+        GreenFunction(zero(GγL.data), SkewHermitian),
+        GreenFunction(zero(GγG.data), SkewHermitian),
     )
 
-    # Equilibrium c- and d-electron Green function
-    G_eq = NCA.projector(nca, imG)
-
-    # Kondo temperature estimation
-    ωK = NCA.kondo_temp(nca.mesh, NCA.gaussian.(nca.mesh, 0.0, 1.0), model.ε₀f, model.V₀)
-
-    if timematrix
-        for t in eachindex(t0), t′ in eachindex(t0)
-            Σ_t(model, data, t0, t, t′)
-        end
-
-        return (nca, imG, G_eq, ωK, data, t0)
-    else
-        return (nca, imG, G_eq, ωK, data, 0.0)
+    for t in eachindex(t0), t′ in eachindex(t0)
+        Σ!(t0, t, t′, model, data)
     end
-end
 
-function initial_condition(data::TimeData)
-    u0 = [data.GfL, data.GfG, data.GbL, data.GbG]
-    return isnothing(data.ωc) ? u0 : [u0; data.GcL; data.GcG]
+    return (Gd, Gc, ωK, data, t0)
 end

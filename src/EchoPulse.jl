@@ -1,9 +1,11 @@
 module EchoPulse
 
-using NCA
-using NCA: nf, gaussian
-using NLsolve, DSP, Interpolations, QuadGK, AMR
-using KadanoffBaym, DSP.FFTW, Interpolations
+using KadanoffBaym, FFTW, Interpolations
+using KadanoffBaym: ft
+
+using PyCall
+optimize = pyimport("scipy.optimize")
+
 using LinearAlgebra
 using UnPack
 

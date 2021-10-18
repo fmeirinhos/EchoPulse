@@ -1,11 +1,12 @@
 ### A Pluto.jl notebook ###
-# v0.14.8
+# v0.16.1
 
 using Markdown
 using InteractiveUtils
 
 # ╔═╡ 54c8d9b4-2d99-11eb-242b-49681ab38480
 begin
+	import Pkg; Pkg.activate()
     using Interpolations, DSP.FFTW, KadanoffBaym
     import LinearAlgebra: diag
 
@@ -13,21 +14,24 @@ begin
     # default(fmt = :png)
 end
 
+# ╔═╡ 2f5f48b6-53c6-4a33-a71a-f8fd038b07b0
+using SpecialFunctions
+
 # ╔═╡ a0f8fbf2-2d99-11eb-34bf-619ba9ace9c3
 begin
     # Gaussian pulse parameters
-    const tc = 50.0  # peak arrival time
+    const tc = 100.0  # peak arrival time
     const Ω = 0.1 # frequency bandwidth of the pulse
 
     function ξ(t)
-        return (Ω^2 / (2π))^(1 / 4) * exp(-(t - tc)^2 * (Ω^2 / 4))
+        return (Ω^2 / (2π))^(1 / 2) * exp(-t^2 * (Ω^2 / 2))
     end
 
     # Photon field Hamiltonian
     ω₀ = 1.0
 
     # Initial field occupation
-    n0 = ξ(0.0)^2 / Ω
+    n0 = ξ(0.0 - tc) / Ω
     @assert !iszero(n0)
 
     # Initial conditions
@@ -40,22 +44,24 @@ begin
     # Define commutator
     ⋊(a, b) = a * b - b * adjoint(a)
 
-    function f_vert(u, ts, t1, t2)
-        GL, GG = u[1], u[2]
-		
+    function f_vert(out, ts, t1, t2)		
 		h0 = -ω₀ - 1.0im * (ts[t1] - ts[t2]) * 0.5 * Ω^2
 		h1 = 0.5im * ((tc - 0.5(ts[t1] + ts[t2])) * Ω^2)
 		
-        rhsL = -1.0im * (h0 * GL[t1, t2] + h1 * GL[t1, t2])
-        rhsG = -1.0im * (h0 * GL[t1, t2] + h1 * GL[t1, t2])
-        return [rhsL, rhsL]
+        out[1] = -1.0im * (h0 * GᵞL[t1, t2] + h1 * GᵞL[t1, t2])
+        out[2] = -1.0im * (h0 * GᵞL[t1, t2] + h1 * GᵞL[t1, t2])
+        return out
     end
 end
 
 # ╔═╡ d0e7a16c-2d99-11eb-3da9-d193be8e6f43
 begin
-    tspan = (0.0, 100.0)
-    sol = kbsolve(f_vert, (u,ts,t1) -> f_vert(u,ts,t1,t1) .- adjoint.(f_vert(u,ts,t1,t1)), u0, tspan; atol = 0, rtol = 1e-5, dtini=1e-10, dtmax=0.5)
+    tspan = (0.0, 150.0)
+    sol = kbsolve!(f_vert, (out,ts,t1,t2) -> begin
+			println(" t: $(ts[t1])")
+			f_vert(out,ts,t1,t2)
+			out .-= adjoint.(out)
+		end, u0, tspan; atol = 0, rtol = 1e-5, dtini=1e-10, dtmax=0.5)
 end;
 
 # ╔═╡ 0c6a841e-2d9a-11eb-1d8c-151d18116e55
@@ -65,7 +71,7 @@ begin
     plot!(
         twinx(),
         sol.t,
-        ξ.(sol.t).^2;
+        ξ.(sol.t .- tc);
         color = :green,
         legend = :right,
         label = "Pulse",
@@ -75,22 +81,36 @@ begin
 end
 
 # ╔═╡ 26b0aed4-2d9a-11eb-127b-cbc0eabee1be
-begin
-    ρ, (ωs, ts) = wigner_transform_itp(GᵞG.data - GᵞL.data, sol.t)
+# begin
+#     ρ, (ωs, ts) = wigner_transform_itp(GᵞG.data - GᵞL.data, sol.t)
 
-    heatmap(ts, ωs, real(ρ); xlabel = L"$T$", ylabel = L"$\omega$")
-end
+#     heatmap(ts, ωs, -imag(ρ); xlabel = L"$T$", ylabel = L"$\omega$")
+# end
 
 # ╔═╡ 53737820-2d9a-11eb-2da7-c553a8a2c56e
-# Possible analytic pulse
-f(t, t′) =
-    -1.0im * exp(-1.0im * (t - t′) * ω₀) * ξ(0.5 * (t + t′))^2 * exp(-(t - t′)^2 * (Ω^2 / 4))
+# # Possible analytic pulse
+# f(t, t′) =
+#     -1.0im * exp(-1.0im * (t - t′) * ω₀) * ξ(0.5 * (t + t′))^2 * exp(-(t - t′)^2 * (Ω^2 / 4))
 
 # ╔═╡ 56f857e0-2d9a-11eb-38a9-bf4566aabc1c
-heatmap(sol.t, sol.t, [imag(f(a, b)) for a in sol.t, b in sol.t])
+# heatmap(sol.t, sol.t, [imag(f(a, b)) for a in sol.t, b in sol.t])
 
 # ╔═╡ 5bdcd6c8-2d9a-11eb-22a7-45a53df95187
-heatmap(sol.t, sol.t, -(GᵞG.data) |> imag)
+# heatmap(sol.t, sol.t, -(GᵞG.data) |> imag)
+
+# ╔═╡ 8d701f42-ddba-4044-8481-3896aaba0e48
+gg(T, τ) = 0.5 * (1 + im * erfi((τ * Ω^2 - 1.0im * ω₀)/(sqrt(2) * Ω)))
+
+# ╔═╡ f3586973-d84f-4cd3-8a8b-483a86fc0760
+gl(T, τ) = -1.0im * exp(-1.0im * τ * ω₀) * ξ(τ) * ξ(T - tc)
+
+# ╔═╡ 1e8d2827-ffb9-48ea-b71b-ce7a46fd32e5
+begin
+	τs = sol.t .- reverse(sol.t)
+	plot(τs, [gg(tc, τ) for τ in τs] |> real)
+	xlims!(-100,100)
+	ylims!(-1,1)
+end
 
 # ╔═╡ Cell order:
 # ╠═54c8d9b4-2d99-11eb-242b-49681ab38480
@@ -101,3 +121,7 @@ heatmap(sol.t, sol.t, -(GᵞG.data) |> imag)
 # ╠═53737820-2d9a-11eb-2da7-c553a8a2c56e
 # ╠═56f857e0-2d9a-11eb-38a9-bf4566aabc1c
 # ╠═5bdcd6c8-2d9a-11eb-22a7-45a53df95187
+# ╠═2f5f48b6-53c6-4a33-a71a-f8fd038b07b0
+# ╠═8d701f42-ddba-4044-8481-3896aaba0e48
+# ╠═f3586973-d84f-4cd3-8a8b-483a86fc0760
+# ╠═1e8d2827-ffb9-48ea-b71b-ce7a46fd32e5
