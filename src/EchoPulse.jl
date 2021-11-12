@@ -1,13 +1,14 @@
 module EchoPulse
 
+using LinearAlgebra
+using SpecialFunctions
+
+using NLsolve
+
 using KadanoffBaym, FFTW, Interpolations
 using KadanoffBaym: ft
 
-using PyCall
-optimize = pyimport("scipy.optimize")
-
-using LinearAlgebra
-using UnPack
+using LangrethsRules
 
 include("utils.jl")
 include("model.jl")
