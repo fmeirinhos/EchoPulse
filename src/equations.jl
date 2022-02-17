@@ -1,4 +1,4 @@
-function fv!(out, ts, t1, t2, model::PhotonAssistedSIAM, data::TimeData, T₀::Float64; diag=false)
+function fv!(out, ts, t1, t2, model::PhotonAssistedSIAM, data::TimeData, T₀::Float64; pulse)
     (; GfL, GfG, GbL, GbG, ΣfL, ΣfG, ΣbL, ΣbG, GcL, GcG, TcL, TcG, εs) = data
 
     ∫dt(x...) = integrate(ts, t1, t2, x...)
@@ -12,32 +12,32 @@ function fv!(out, ts, t1, t2, model::PhotonAssistedSIAM, data::TimeData, T₀::F
     out[4] = -im * (-model.ε₀f * GbG[t1, t2] + ∫dt(t2, t1, ΣbG, GbG))
 
     # laser pulse
-    # (; GγL, GγG, TγL, TγG) = data
-    # h0 = model.ω₀ - 1.0im * (ts[t1] - ts[t2]) * model.Ω₀^2
-    # h1 = 0.5im * (T₀ - 0.5(ts[t1] + ts[t2])) * model.Ω₀^2
+    (; GγL, GγG, TγL, TγG) = data
+    h0 = model.ω₀ - 1.0im * model.Ω₀ * 2tanh(model.Ω₀ * (ts[t1] - ts[t2]))
+    h1 = -0.5im * model.Ω₀ * 2tanh(model.Ω₀ * (0.5(ts[t1] + ts[t2]) - T₀))
 
-    # out[5] = begin
-    #     # I = ∫dt(1, t1, TγG, GγL) - ∫dt(1, t2, TγL, GγG) - ∫dt(t2, t1, TγL, GγL)
-    #     -im * ((h0 + h1) * GγL[t1, t2]) #+ (abs2(I) > 1e-5 ? I : 0.0))
-    # end
-    # out[6] = begin
-    #     # I = ∫dt(t2, t1, TγG, GγG) - ∫dt(1, t1, TγL, GγG) + ∫dt(1, t2, TγG, GγL)
-    #     -im * (h0 * GγG[t1, t2] + h1 * GγL[t1, t2]) #+ (abs2(I) > 1e-5 ? I : 0.0))
-    # end
+    out[5] = begin
+        I = ∫dt(1, t1, TγG, GγL) - ∫dt(1, t2, TγL, GγG) - ∫dt(t2, t1, TγL, GγL)
+        -im * ((h0 + h1) * GγL[t1, t2] + (pulse ? I : 0.0))
+    end
+    out[6] = begin
+        I = ∫dt(t2, t1, TγG, GγG) - ∫dt(1, t1, TγL, GγG) + ∫dt(1, t2, TγG, GγL)
+        -im * (h0 * GγG[t1, t2] + h1 * GγL[t1, t2] + (pulse ? I : 0.0))
+    end
 
     # c-electrons
     if !isnothing(data.dos_c)
         for i in eachindex(εs)
-            out[4 + i] = -im * (∫dt(1, t1, TcG, GcL[i], εs[i]) - ∫dt(1, t2, TcL, GcG[i], εs[i]) + ∫dt(t1, t2, TcL, GcL[i], εs[i]))
-            out[4 + length(εs) + i] = -im * (∫dt(t2, t1, TcG, GcG[i], εs[i]) - ∫dt(1, t1, TcL, GcG[i], εs[i]) + ∫dt(1, t2, TcG, GcL[i], εs[i]))
+            out[6 + i] = -im * (∫dt(1, t1, TcG, GcL[i], εs[i]) - ∫dt(1, t2, TcL, GcG[i], εs[i]) + ∫dt(t1, t2, TcL, GcL[i], εs[i]))
+            out[6 + length(εs) + i] = -im * (∫dt(t2, t1, TcG, GcG[i], εs[i]) - ∫dt(1, t1, TcL, GcG[i], εs[i]) + ∫dt(1, t2, TcG, GcL[i], εs[i]))
         end
     end
 
     return out
 end
 
-function fd!(out, ts, t1, t2, model::PhotonAssistedSIAM, data::TimeData, T₀)
-    fv!(out, ts, t1, t2, model, data, T₀; diag=true)
+function fd!(out, ts, t1, t2, model::PhotonAssistedSIAM, data::TimeData, T₀; pulse)
+    fv!(out, ts, t1, t2, model, data, T₀, pulse=pulse)
     @. out -= conj(out)
 end
 
@@ -48,10 +48,10 @@ function Σ!(ts, t1, t2, model::PhotonAssistedSIAM, data::TimeData)
     ρcL = isnothing(dos_c) ? GcL(ts[t1], ts[t2]) : integrate(εs, [exp(-im * εs[i] * (ts[t1] - ts[t2])) * GcL[i][t1, t2] * dos_c[i] for i in eachindex(dos_c)])
     ρcG = isnothing(dos_c) ? GcG(ts[t1], ts[t2]) : integrate(εs, [exp(-im * εs[i] * (ts[t1] - ts[t2])) * GcG[i][t1, t2] * dos_c[i] for i in eachindex(dos_c)])
 
-    V²L = model.V₀^2 + im * model.Γ₀^2 * (GγL0(ts[t1], ts[t2]) + GγG0(ts[t2], ts[t1]))
-    V²G = model.V₀^2 + im * model.Γ₀^2 * (GγG0(ts[t1], ts[t2]) + GγL0(ts[t2], ts[t1]))
-    # V²L = model.V₀^2 + im * model.Γ₀^2 * (data.GγL[t1, t2] + data.GγG[t2, t1])
-    # V²G = model.V₀^2 + im * model.Γ₀^2 * (data.GγG[t1, t2] + data.GγL[t2, t1])
+    # V²L = model.V₀^2 + im * model.Γ₀^2 * (GγL0(ts[t1], ts[t2]) + GγG0(ts[t2], ts[t1]))
+    # V²G = model.V₀^2 + im * model.Γ₀^2 * (GγG0(ts[t1], ts[t2]) + GγL0(ts[t2], ts[t1]))
+    V²L = model.V₀^2 + im * model.Γ₀^2 * (data.GγL[t1, t2] + data.GγG[t2, t1])
+    V²G = model.V₀^2 + im * model.Γ₀^2 * (data.GγG[t1, t2] + data.GγL[t2, t1])
 
     ΣfL[t1, t2] = +1im * V²L * GbL[t1, t2] * ρcL
     ΣfG[t1, t2] = +1im * V²G * GbG[t1, t2] * ρcG
@@ -61,11 +61,11 @@ function Σ!(ts, t1, t2, model::PhotonAssistedSIAM, data::TimeData)
     GdL = im * GfL[t1, t2] * GbG[t2, t1]
     GdG = im * GfG[t1, t2] * GbL[t2, t1]
 
-    TcL[t1, t2] = +0.1 * model.V₀^2 * GdL
-    TcG[t1, t2] = +0.1 * model.V₀^2 * GdG
+    TcL[t1, t2] = +model.γ * model.V₀^2 * GdL
+    TcG[t1, t2] = +model.γ * model.V₀^2 * GdG
 
-    # TγL[t1, t2] = +0.3im * model.Γ₀^2 * (GdL * ~GdG + GdL * ~GdG)#(GdL * ~ρcG + ρcL * ~GdG)
-    # TγG[t1, t2] = +0.3im * model.Γ₀^2 * (GdG * ~GdL + GdG * ~GdL)#(GdG * ~ρcL + ρcG * ~GdL)
+    TγL[t1, t2] = -model.γ * model.Γ₀^2 * im * (GdL * ~ρcG + ρcL * ~GdG) #(GdL * ~GdG + GdL * ~GdG)
+    TγG[t1, t2] = -model.γ * model.Γ₀^2 * im * (GdG * ~ρcL + ρcG * ~GdL) #(GdG * ~GdL + GdG * ~GdL)
     return
 end
 
@@ -84,7 +84,7 @@ function resize_Σ!(data::TimeData)
 end
 
 function initial_condition(data::TimeData)
-    u0 = [data.GfL, data.GfG, data.GbL, data.GbG]#, data.GγL, data.GγG]
+    u0 = [data.GfL, data.GfG, data.GbL, data.GbG, data.GγL, data.GγG]
     return isnothing(data.dos_c) ? u0 : [u0; data.GcL; data.GcG]
 end
 
@@ -98,9 +98,13 @@ function project(data::TimeData, model::PhotonAssistedSIAM; ts, dmft)
 
     # free photon
     G0γ = TimeOrderedGF(
-        [data.GγL0(t1, t2) for t1 in ts, t2 in ts],
-        [data.GγG0(t1, t2) for t1 in ts, t2 in ts],
+        data.GγL.data,
+        data.GγG.data,
         ts)
+    # G0γ = TimeOrderedGF(
+    #     [data.GγL0(t1, t2) for t1 in ts, t2 in ts],
+    #     [data.GγG0(t1, t2) for t1 in ts, t2 in ts],
+    #     ts)
 
     # c-electron t-matrix
     Tc1 = model.V₀^2 * Gd

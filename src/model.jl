@@ -12,9 +12,10 @@ struct PhotonAssistedSIAM{T<:AbstractFloat}
 
   # other parameters
   η::T      # c-electron artificial damping (solves a weird behaviour at large `τ` after summing all frequencies)
+  γ::T      # particle density (poor-man's dmft)
 
-  function PhotonAssistedSIAM(; V₀, ε₀f, ω₀, Ω₀, Γ₀, η=0.03)
-    t = promote(V₀, ε₀f, ω₀, Ω₀, Γ₀, η)
+  function PhotonAssistedSIAM(; V₀, ε₀f, ω₀, Ω₀, Γ₀, γ, η=0.03)
+    t = promote(V₀, ε₀f, ω₀, Ω₀, Γ₀, η, γ)
     return new{eltype(t)}(t...)
   end
 end
@@ -137,9 +138,8 @@ function TimeData(; model::PhotonAssistedSIAM, ωs, β, T₀, Nᵧ, εs, dmft, t
     # gaussian pulse
     (; ω₀, Ω₀) = model
 
-    N̄ᵧ(T) = Nᵧ * √(2π / Ω₀^2) * gaussian(T, T₀, inv(Ω₀))
-    GᵞL₀(t, t′) = -im * (0 + N̄ᵧ(0.5(t + t′))) * exp(-1im * ω₀ * (t - t′)) * gaussian(t - t′, 0, inv(Ω₀)) * √(2π / Ω₀^2)
-    GᵞG₀(t, t′) = -im * (1 + N̄ᵧ(0.5(t + t′))) * exp(-1im * ω₀ * (t - t′)) * gaussian(t - t′, 0, inv(Ω₀)) * √(2π / Ω₀^2)
+    GᵞL₀(t, t′) = -im * (0 + Nᵧ * sech((0.5(t + t′) - T₀) * Ω₀)^2) * exp(-1im * ω₀ * (t - t′)) * sech((t - t′) * Ω₀)^2
+    GᵞG₀(t, t′) = -im * (1 + Nᵧ * sech((0.5(t + t′) - T₀) * Ω₀)^2) * exp(-1im * ω₀ * (t - t′)) * sech((t - t′) * Ω₀)^2
 
     GγL = GreenFunction(GᵞL₀(0.0, 0.0) * ones(1, 1), SkewHermitian)
     GγG = GreenFunction(GᵞG₀(0.0, 0.0) * ones(1, 1), SkewHermitian)

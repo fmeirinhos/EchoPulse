@@ -59,7 +59,10 @@ begin
         Γ₀ = sqrt(0.02),  # light-matter coupling
         ω₀ = 1.2e-2, # photon energy
         Ω₀ = 1.2e-1,
-		η = 0.005
+
+		# other parameters
+		η = 0.005, # c-electron width (deactivated)
+		γ = 0.03   # impurity fraction
     )
 
     # time pulse parameters
@@ -175,8 +178,8 @@ end
 # ╔═╡ 0cdaa3dc-6f7d-11eb-145d-2790c94fec9d
 begin	
 	@time ts = kbsolve!(
-		(x...) -> EchoPulse.fv!(x..., model, tdata, T₀),
-		(x...) -> EchoPulse.fd!(x..., model, tdata, T₀),
+		(x...) -> EchoPulse.fv!(x..., model, tdata, T₀; pulse=x[2][x[3]] > 50),
+		(x...) -> EchoPulse.fd!(x..., model, tdata, T₀; pulse=x[2][x[3]] > 50),
 		EchoPulse.initial_condition(tdata),
 		(t0, tmax);
 		atol = 1e-2 * rtol,
