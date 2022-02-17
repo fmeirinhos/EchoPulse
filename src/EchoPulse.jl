@@ -1,5 +1,3 @@
-module EchoPulse
-
 using LinearAlgebra
 using SpecialFunctions
 
@@ -13,5 +11,3 @@ using LangrethsRules
 include("utils.jl")
 include("model.jl")
 include("equations.jl")
-
-end # module
