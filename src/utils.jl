@@ -22,31 +22,23 @@ end
 Finds the fixed point of some function `f` with initial guess `x0`
 """
 function fixed_point(f, x0)
-    # x0 = nlsolve(
-    #     x -> f(x) - x,
-    #     x0;
-    #     show_trace = :true,
-    #     method = :anderson,
-    #     beta = 0.1,# Since DMFT is kind of unstable we take very conservative steps
-    #     m = 1,      # and ignore previous function calls
-    #     ftol = 1e-2,
-    # ).zero
-
     nlsolve(
         x -> f(x) - x,
         x0;
         show_trace = :true,
         method = :anderson,
-        beta = 0.5,
-        ftol = 1e-12,
+        iterations = 200,
+        beta = 0.6, 
+        m=3,
+        ftol=1e-9
     ).zero
 end
 
-# Gaussian
-gaussian(x, x₀, σ) = exp(-0.5 * ((x - x₀) / (σ))^2) / sqrt(2 * π * σ^2)
-
-# Fermi function
+# Fermi-Dirac distribution function
 nf(ω, β) = 0.5 * (1.0 - tanh(0.5 * β * ω))
 
-# Bose function
+# Bose-Einstein distribution function
 nb(ω, β) = !iszero(ω) ? 0.5 * (coth(0.5 * β * ω) - 1.0) : 0.0
+
+# Bethe lattice density of states (∫dε bethe_dos(ε) = 1)
+bethe_dos(ε) = abs(ε) <= 2 ? 1 / pi * sqrt(1 - (ε / 2)^2) : 0.0

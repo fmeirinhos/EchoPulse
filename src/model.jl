@@ -1,35 +1,24 @@
 """
-Photon assisted single impurity Anderson Model
+Photon-assisted Anderson impurity model
 """
-struct PhotonAssistedSIAM{T<:AbstractFloat}
-    # physical parameters
+Base.@kwdef struct PhotonAssistedAIM{T<:AbstractFloat}
     V0::T     # Hybridization strength
-    ε0f::T    # F-electron ground state e
-    U::T
+    ε0f::T    # F-electron ground state energy
+    U0::T     # F-electron Coulomb repulsion
 
+    Γ0::T     # Photon hybridization strength
     ω0::T     # Photon frequency
     Ω0::T     # Photon width
-    Γ0::T     # Photon hybridization strength
-
-    # other parameters
-    η::T      # particle density (poor-man's dmft)
-    γ::T      # particle density (poor-man's dmft)
-
-    a::T
-    function PhotonAssistedSIAM(; V0, ε0f, U, ω0, Ω0, Γ0, γ, η, a=0)
-        t = promote(V0, ε0f, U, ω0, Ω0, Γ0, η, γ, a)
-        return new{eltype(t)}(t...)
-    end
 end
 
 """
-Data needed to solve the Kadanoff-Baym equations in the real-time contour
+Data for solving the photon-assisted Anderson impurity model in non-equilibrium
 """
-struct TimeData{T}
-    GcL::Any
-    GcG::Any
-    dos_c::Vector{Float64}
-    εs::Vector{Float64}
+struct PhotonAssistedAIMData{T<:Complex{<:AbstractFloat}}
+    𝒢cL::Any    # Weiss field
+    𝒢cG::Any    # Weiss field
+    GcL         # Local field
+    GcG         # Local field
 
     GfL::GreenFunction{T,2,Array{T,2},SkewHermitian}
     GfG::GreenFunction{T,2,Array{T,2},SkewHermitian}
@@ -57,133 +46,133 @@ struct TimeData{T}
     TγG::GreenFunction{T,2,Array{T,2},SkewHermitian}
 end
 
-function TimeData(; model::PhotonAssistedSIAM, ωs, β, Tγ, Nγ, εs, timematrix)
-    @assert isodd(length(ωs)) && first(ωs) == -last(ωs) "Must be met for double `ft` to act as identity."
+function PhotonAssistedAIMData(; model::PhotonAssistedAIM, ωs, β, Tγ, Nγ, timematrix, dmft)
+    @assert isodd(length(ωs)) && first(ωs) == -last(ωs) "Must hold for double `ft` to be an identity."
 
-    (; ω0, Ω0) = model
+    # Discrete Fourier grid of ωs
+    τs = ft(ωs, ωs; inverse = true)[1]
 
-    ts = ft(ωs, ωs; inverse = true)[1]
-    Θt = (t -> t > 0 ? 1 : t == 0 ? 0.5 : 0.0).(ts) # Heaviside magic
+    # Non-interacting photon Green functions
+    GγL0_f(t, t′; Nγ = Nγ) = -im * (0 + Nγ * sech((0.5(t + t′) - Tγ) * model.Ω0)^2) * exp(-1im * model.ω0 * (t - t′)) * sech((t - t′) * model.Ω0 / 4)^2
+    GγG0_f(t, t′; Nγ = Nγ) = -im * (1 + Nγ * sech((0.5(t + t′) - Tγ) * model.Ω0)^2) * exp(-1im * model.ω0 * (t - t′)) * sech((t - t′) * model.Ω0 / 4)^2
 
-    GγL0_f(t, t′; Nγ=Nγ) = -im * (0 + Nγ * sech((0.5(t + t′) - Tγ) * Ω0)^2) * exp(-1im * ω0 * (t - t′)) * sech((t - t′) * Ω0/4)^2
-    GγG0_f(t, t′; Nγ=Nγ) = -im * (1 + Nγ * sech((0.5(t + t′) - Tγ) * Ω0)^2) * exp(-1im * ω0 * (t - t′)) * sech((t - t′) * Ω0/4)^2
+    # Solve the system in thermal equilibrium
+    (; GdRω, GcRω, 𝒢cRω, 𝒢cLτ, 𝒢cGτ, GLτ, GGτ) = let
+        function eq_loop(Στ)
+            @views ΣGτ, ΣLτ = Στ[:, 1:3], Στ[:, 4:6]
 
-    # Calculate ργ>(t) and ργ<(t)
-    GγL, GγG = let
-        # photon density of states
-        dos_γ(ω) = 2π * gaussian(ω, +model.ω0, model.Ω0)
+            # Σ>(τ) –> ΣR(ω) & Σ<(τ) –> Σ<(ω)
+            ΣRω = mapslices(x -> ft(τs, x .* Θτ; inverse = false)[2], ΣGτ; dims = 1)
+            ΣLω = mapslices(x -> ft(τs, x; inverse = false)[2], ΣLτ; dims = 1)
 
-        # Initially the photon field is *NOT* occupied: β → ∞
-        GγL = (τ -> GγL0_f(τ/2, -τ/2; Nγ=0)).(ts)
-        GγG = (τ -> GγG0_f(τ/2, -τ/2; Nγ=0)).(ts)
+            GRω, GLω = calculate_Gω(ωs, model, ΣRω, ΣLω)
 
-        GγL, GγG
-    end
+            # GR(ω) –> G>(τ) & G<(ω) –> G<(τ)
+            GGτ = mapslices(x -> ft(ωs, im * 2imag(x); inverse = true)[2], GRω; dims = 1)
+            GLτ = mapslices(x -> ft(ωs, im * 1imag(x); inverse = true)[2], GLω; dims = 1)
 
-    # Calculate ρc>(t) and ρc<(t) from ρc(ω) = ∑k Gc(k; ω)
-    ρcL, ρcG = let
-        ρc(z) = 2 * gaussian(z, 0.0, 1.0) * (π * erfi(z / sqrt(2)) - log(z) - log(-1 / z)) |> imag
-        ρcL = ft(ωs, +im * ρc.(ωs .- im * 1e-2) .* nf.(+ωs, β); inverse = true)[2]
-        ρcG = ft(ωs, -im * ρc.(ωs .- im * 1e-2) .* nf.(-ωs, β); inverse = true)[2]
+            # Projection
+            GdRω = ft(τs, (@. +im * ((GGτ[:, 2] * ~GLτ[:, 1] - GGτ[:, 3] * ~GLτ[:, 2]) - (GLτ[:, 2] * ~GGτ[:, 1] - GLτ[:, 3] * ~GGτ[:, 2])) * Θτ); inverse = false)[2]
 
-        ρcL, ρcG
-    end
+            # Bethe-lattice k-sum
+            𝒢cRω, GcRω = let
+                𝒢cRω = ft(τs, Στ[:, 7] .* (τ -> τ >= 0 ? 1 : 0.0).(τs); inverse = false)[2] # enforces Heaviside-sparsity (not guaranteed by fixed_point)
+                GcRω = @. 𝒢cRω + abs2(model.V0) * 𝒢cRω * GdRω * 𝒢cRω
+                𝒢cRω = dmft ? inv.(ωs - GcRω) : -im * π * bethe_dos.(ωs)
+                𝒢cRω, GcRω
+            end
 
-    # Obtain pseudo-particle Greater and Lesser functions in equilibrium
-    GG, GL, GdR_eq, ρcR_eq = let
-        ρc = ρcG - ρcL
+            𝒢cRτ = ft(ωs, +2im * imag(𝒢cRω); inverse = true)[2] .* Θτ
+            𝒢cGτ = ft(ωs, +2im * imag(𝒢cRω) .* nf.(-ωs, β); inverse = true)[2]
+            𝒢cLτ = ft(ωs, -2im * imag(𝒢cRω) .* nf.(+ωs, β); inverse = true)[2]
 
-        # Solve NCA equations
-        Σt = fixed_point(hcat(ρc, ρc, ρc, -ρc, ρc, ρc)) do Σt
-            # Σ>(t) –> ΣR(ω) & Σ<(t) –> Σ<(ω)
-            ΣR = mapslices(x -> ft(ts, x .* Θt; inverse = false)[2], Σt[:, 1:3]; dims = 1)
-            ΣL = mapslices(x -> ft(ts, x; inverse = false)[2], Σt[:, 4:6]; dims = 1)
-
-            GR, GL = calculate_Gω(ωs, model, ΣR, ΣL)
-
-            # GR(ω) –> G>(t) & G<(ω) –> G<(t)
-            GG = mapslices(x -> ft(ωs, im * 2imag(x); inverse = true)[2], GR; dims = 1)
-            GL = mapslices(x -> ft(ωs, im * 1imag(x); inverse = true)[2], GL; dims = 1)
-
-            Σt′ = calculate_Σt(model, ρcG, ρcL, GγG, GγL, GG, GL)
-
-            return Σt′
+            ΣGτ, ΣLτ = calculate_Στ(model, 𝒢cGτ, 𝒢cLτ, GγGτ, GγLτ, GGτ, GLτ)
+            (; Στ′ = hcat(ΣGτ, ΣLτ, 𝒢cRτ), GdRω, GcRω, 𝒢cRω, 𝒢cLτ, 𝒢cGτ, GLτ, GGτ)
         end
 
-        ΣR = mapslices(x -> ft(ts, x .* Θt; inverse = false)[2], Σt[:, 1:3]; dims = 1)
-        ΣL = mapslices(x -> ft(ts, x; inverse = false)[2], Σt[:, 4:6]; dims = 1)
+        # Proper Heaviside
+        Θτ = (τ -> τ > 0 ? 1 : τ == 0 ? 0.5 : 0.0).(τs)
 
-        GR, GL = calculate_Gω(ωs, model, ΣR, ΣL)
+        # Initially (T ≤ 0) the photon field is *NOT* occupied: β → ∞
+        GγLτ = (τ -> GγL0_f(+τ / 2, -τ / 2)).(τs)
+        GγGτ = (τ -> GγG0_f(+τ / 2, -τ / 2)).(τs)
 
-        GG = mapslices(x -> ft(ωs, im * 2imag(x); inverse = true)[2], GR; dims = 1)
-        GL = mapslices(x -> ft(ωs, im * 1imag(x); inverse = true)[2], GL; dims = 1)
+        # C-electron density of states
+        ρc = ft(ωs, -im * 2π * bethe_dos.(ωs); inverse = true)[2]
 
-        GdR = ft(ts, (@. +im * ((GG[:, 2] * ~GL[:, 1] - GG[:, 3] * ~GL[:, 2]) - (GL[:, 2] * ~GG[:, 1] - GL[:, 3] * ~GG[:, 2])) * Θt); inverse = false)[2]
-
-        TcR = abs2(model.V0) * GdR
-        ρ0cR = ft(ts, ρc .* Θt; inverse = false)[2]
-
-        GG, GL, GdR, ρ0cR + ρ0cR .* TcR .* ρ0cR
+        # Solve equilibrium problem
+        fixed_point(first ∘ eq_loop, hcat(ρc, ρc, ρc, -ρc, ρc, ρc, ρc .* Θτ)) |> eq_loop
     end
 
-    # Kondo temperature estimation
-    ρω0 = -1 / (2π) * imag((ts[2] - ts[1]) * sum(ρcG - ρcL))
+    # Assure commutation relations
+    # i0 = length(τs) ÷ 2 + 1
+    # GGτ[i0,1:2] .= -im
+
+    # Kondo temperature estimation (ω = 0 corresponds to ∫dτ)
+    ρω0 = -1 / (2π) * imag((τs[2] - τs[1]) * sum(𝒢cGτ - 𝒢cLτ))
     ωK = exp(model.ε0f / (2 * abs2(model.V0) * ρω0))
 
-    # c-electrons
-    if isempty(εs)
-        GcL = let
-            itp = extrapolate(interpolate((ts,), ρcL, Gridded(Linear())), 0)
-            (t, t′) -> itp(t - t′)
-        end
-        GcG = let
-            itp = extrapolate(interpolate((ts,), ρcG, Gridded(Linear())), 0)
-            (t, t′) -> itp(t - t′)
-        end
-    elseif timematrix
-        @assert false "unsupported"
-    else
-        # Non-interacting conduction-electron GF
-        GcL = [GreenFunction(+im * nf(+ε, β) * ones(1, 1), SkewHermitian) for ε in εs]
-        GcG = [GreenFunction(-im * nf(-ε, β) * ones(1, 1), SkewHermitian) for ε in εs]
-    end
-    dos_c = gaussian.(εs, 0.0, 1.0)
-
-    # auxiliary-particles
     if timematrix
         # Trim the time-grid to contain 2 Kondo time-scale. Looks like 4 timescales but G∞ will "chop" it in half
         τK = inv(ωK)
-        r = argmin(abs.(ts .+ 2τK)):argmin(abs.(ts .- 2τK))
+        r = argmin(abs.(τs .+ 2τK)):argmin(abs.(τs .- 2τK))
 
-        GbL = GreenFunction(G∞(GL[r, 1]), SkewHermitian)
-        GbG = GreenFunction(G∞(GG[r, 1]), SkewHermitian)
+        GbL = GreenFunction(G∞(GLτ[r, 1]), SkewHermitian)
+        GbG = GreenFunction(G∞(GGτ[r, 1]), SkewHermitian)
 
-        GfL = GreenFunction(G∞(GL[r, 2]), SkewHermitian)
-        GfG = GreenFunction(G∞(GG[r, 2]), SkewHermitian)
+        GfL = GreenFunction(G∞(GLτ[r, 2]), SkewHermitian)
+        GfG = GreenFunction(G∞(GGτ[r, 2]), SkewHermitian)
 
-        GaL = GreenFunction(G∞(GL[r, 3]), SkewHermitian)
-        GaG = GreenFunction(G∞(GG[r, 3]), SkewHermitian)
+        GaL = GreenFunction(G∞(GLτ[r, 3]), SkewHermitian)
+        GaG = GreenFunction(G∞(GGτ[r, 3]), SkewHermitian)
 
-        # initial time-grid (equidistant)
-        t0 = ts[1:size(GfL, 1)] .- ts[size(GfL, 1)]
+        # Initial time-grid (equidistant)
+        t0 = τs[1:size(GfL, 1)] .- τs[size(GfL, 1)] |> collect
     else
-        # find τ = 0 index (corresponds to ∫dω)
-        i0 = length(ts) ÷ 2 + 1
+        # Find τ = 0 index (corresponds to ∫dω)
+        i0 = length(τs) ÷ 2 + 1
 
-        GbL = GreenFunction(GL[i0, 1] * ones(1, 1), SkewHermitian)
+        GbL = GreenFunction(GLτ[i0, 1] * ones(1, 1), SkewHermitian)
         GbG = GreenFunction(-im * ones(1, 1), SkewHermitian)
 
-        GfL = GreenFunction(GL[i0, 2] * ones(1, 1), SkewHermitian)
+        GfL = GreenFunction(GLτ[i0, 2] * ones(1, 1), SkewHermitian)
         GfG = GreenFunction(-im * ones(1, 1), SkewHermitian)
 
-        GaL = GreenFunction(GL[i0, 3] * ones(1, 1), SkewHermitian)
-        GaG = GreenFunction(-im * ones(1, 1) * Int(!isinf(model.U)), SkewHermitian)
+        GaL = GreenFunction(GLτ[i0, 3] * ones(1, 1), SkewHermitian)
+        GaG = GreenFunction(-im * ones(1, 1) * Int(!isinf(model.U0)), SkewHermitian)
 
-        # initial time-grid
+        # Initial time-grid
         t0 = [0.0]
     end
 
-    # gaussian pulse
+    if dmft
+        if timematrix
+            𝒢cL = GreenFunction(G∞(𝒢cLτ[r]), SkewHermitian)
+            𝒢cG = GreenFunction(G∞(𝒢cGτ[r]), SkewHermitian)
+
+            GcL = let
+                GcLτ = ft(ωs, -2im * imag(GcRω) .* nf.(+ωs, β); inverse = true)[2]
+                GreenFunction(G∞(GcLτ[r]), SkewHermitian)
+            end
+            GcG = let
+                GcGτ = ft(ωs, +2im * imag(GcRω) .* nf.(-ωs, β); inverse = true)[2]
+                GreenFunction(G∞(GcGτ[r]), SkewHermitian)
+            end
+        else
+            @assert false "DMFT without timematrix NOT supported!"
+        end
+    else
+        𝒢cL = let
+            itp = extrapolate(interpolate((τs,), 𝒢cLτ, Gridded(Linear())), 0)
+            (t, t′) -> itp(t - t′)
+        end
+        𝒢cG = let
+            itp = extrapolate(interpolate((τs,), 𝒢cGτ, Gridded(Linear())), 0)
+            (t, t′) -> itp(t - t′)
+        end
+    end
+
+    # photon pulse
     GγL = GreenFunction([GγL0_f(t1, t2) for t1 in t0, t2 in t0], SkewHermitian)
     GγG = GreenFunction([GγG0_f(t1, t2) for t1 in t0, t2 in t0], SkewHermitian)
 
@@ -196,13 +185,13 @@ function TimeData(; model::PhotonAssistedSIAM, ωs, β, Tγ, Nγ, εs, timematri
     @assert all(-imag(diag(GbL.data)) + 2imag(diag(GfL.data)) - imag(diag(GaL.data)) .≈ 1.0)
     # @assert all(isapprox.(diag(GfG.data), -im; rtol=1e-3))
     # @assert all(isapprox.(diag(GbG.data), -im; rtol=1e-3))
-    # @assert isinf(model.U) || all(isapprox.(diag(GaG.data), -im; rtol=1e-3))
+    # @assert isinf(model.U0) || all(isapprox.(diag(GaG.data), -im; rtol=1e-3))
 
-    data = TimeData(GcL, GcG, dos_c, εs, GfL, GfG, GbL, GbG, GaL, GaG, GγL, GγG, GγL0, GγG0, GγL0_f, GγG0_f, zero(GfL), zero(GfG), zero(GbL), zero(GbG), zero(GaL), zero(GaG), zero(GbL), zero(GbG), zero(GγL), zero(GγG))
+    data = PhotonAssistedAIMData(𝒢cL, 𝒢cG, GcL, GcG, GfL, GfG, GbL, GbG, GaL, GaG, GγL, GγG, GγL0, GγG0, GγL0_f, GγG0_f, zero(GfL), zero(GfG), zero(GbL), zero(GbG), zero(GaL), zero(GaG), zero(GbL), zero(GbG), zero(GγL), zero(GγG))
 
     for t in eachindex(t0), t′ in eachindex(t0)
-        Σ!(t0, nothing, nothing, t, t′, model, data)
+        calculate_Σt!(t0, nothing, nothing, t, t′, model, data; dmft = dmft)
     end
 
-    return (; GdR_eq, ρcR_eq, ωK, data, t0)
+    return (; GdRω, GcRω, 𝒢cRω, ωK, data, t0)
 end

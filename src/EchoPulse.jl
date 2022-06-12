@@ -10,4 +10,4 @@ using LangrethsRules
 
 include("utils.jl")
 include("model.jl")
-include("equations.jl")
+include("nca.jl")
