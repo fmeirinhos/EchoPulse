@@ -62,56 +62,61 @@ end;
 # parameters (units of half-bandwidth)
 begin
     # inverse temperature
-    β = 1e2
+    β = 1.5e2
 
     # model parameters
     model = EchoPulse.PhotonAssistedAIM(
         # siam
         ;
-        V0 = sqrt(0.1),# hybridization strength
+        V0 = sqrt(0.11),# hybridization strength
         ε0f = -0.35,# d-electron energy
         U0 = Inf,
-
+		
         # quantum light
-        Γ0 = 0sqrt(0.01), # light-matter coupling
-        ω0 = 8.0e-2, # photon energy
-        Ω0 = 1.5 * 8.0e-2, # photon frequency bandwidth
+        Γ0 = 0sqrt(0.02), # light-matter coupling
+        ω0 = 4.0e-1, # photon energy
+        Ω0 = 1.0e-1, # photon frequency bandwidth
     )
 
-    # pulse time parameters
-    Nγ = 5.0e-0 # maximum photon occupation
-    Tγ = 1.0e2 # peak arrival time
+    # time-pulse parameters
+    Nγ = 5.0e-1 # maximum photon occupation
+    tγ = 1.0e2 # peak arrival time
 
     # Bethe lattice dmft
-    dmft = true
+    dmft = false
 
-    # solve with time-matrix initial condition
+    # time-matrix initial condition
     timematrix = true
 
-    # integration parameters
-    tmax = 1e2
-    rtol = 1e-5
+    # computational parameters
+	ωs_eq = range(-12., 12.; length = 2^16 - 1)
+    tmax = 3.0e2
+    rtol = 5e-5
 end;
 
 # ╔═╡ 75af13de-fcb5-4e1d-804f-dc3cc0809eed
 begin
-    ωs_eq = range(-7.0, 7.0; length = 2^15 - 1)
-
-    (; data, GdRω, GcRω, 𝒢cRω, ωK, t0) = EchoPulse.PhotonAssistedAIMData(model = model, ωs = ωs_eq, β = β, Tγ = Tγ, Nγ = Nγ, timematrix = timematrix, dmft = dmft)
+    (; data, GdRω, GcRω, 𝒢cRω, GγRω, ωK, τK, t0) = EchoPulse.PhotonAssistedAIMData(
+		model = model, 
+		ωs = ωs_eq, 
+		β = β, 
+		tγ = tγ,
+		Nγ = Nγ, 
+		dmft = dmft,
+		timematrix = timematrix, 
+		)
 end;
 
 # ╔═╡ 21895ece-5cf4-4f6f-b851-44d4fefb1788
-begin
+let
     cecu6_half_bandwidth = 2.0 # eV
-    cdos_half_bandwidth = 2
+    cdos_half_bandwidth = 2.0
     to_eV = cecu6_half_bandwidth / cdos_half_bandwidth
 
     ω_to_eV(ω) = round(ω * to_eV; digits = 3)
     ω_to_THz(ω) = round(ω * to_eV * 2.4179893e2; digits = 3)
     ω_to_ps(ω) = round(inv(ω * to_eV * 2.4179893e2); digits = 3)
     ω_to_K(ω) = round(ω * to_eV * 1.1604518e4; digits = 3)
-
-    τK = inv(ωK)
 
     md"""
     #### Summary
@@ -126,26 +131,31 @@ begin
     7. ``\Gamma = `` $(ω_to_eV(model.Γ0)) ``eV`` (light-matter coupling)
     8. ``N_\gamma = `` $(round(Nγ, digits=3)) ``n_\gamma`` (number of photons)
 
-    The system will be integrated in the interval (0, $(ω_to_ps(inv(tmax)))) ``ps`` with the light-pulse reaching its maximum at $(ω_to_ps(inv(Tγ))) ``ps``.
+    The system will be integrated in the interval (0, $(ω_to_ps(inv(tmax)))) ``ps`` with the light-pulse reaching its maximum at $(ω_to_ps(inv(tγ))) ``ps``.
     """
 end
 
 # ╔═╡ 1ecc4622-b311-47bd-8ba0-d6effa01fa35
-let	
+let
+	Plots.gr()
+	
     plot(ωs_eq, -imag(GcRω); 
-		label = L"-\textrm{Im}\sum_k G^R_{c}(k,\omega)", 
+		label = L"-\mathrm{Im}\,\sum_k G^R_{c}(k,\omega)", 
 		line = (my_colors[:c], ),
 		xlabel = L"\omega/D", 
 		title = "Equilibrium spectral functions", 
-		xlims = 0.5 .* extrema(ωs_eq), 
+		xlims = (-3.0, 3.0), 
 		ylims = (0.0, Inf)
 	)
+	# xlims!(-0.1, 0.1)
 
     plot!(ωs_eq, -imag(GdRω); 
-		label = L"-\textrm{Im}G^R_d(\omega)", 
+		label = L"-\mathrm{Im}\,G^R_d(\omega)", 
 		line = (my_colors[:dω], ),
 	)
 
+	# plot!(ωs_eq, imag(Gc__))
+	
     vline!(model.ε0f * [1.0]; 
 		label = L"\varepsilon_d", 
 		line = (:dot, 1.5, my_colors[:εd], 0.75)
@@ -166,15 +176,16 @@ end
 begin
     # Time-step
     @time ts, ws = kbsolve!(
-		(x...) -> EchoPulse.fv!(x..., model, data; Tγ = Tγ, pulse = true), 
-        (x...) -> EchoPulse.fd!(x..., model, data; Tγ = Tγ, pulse = true), 
+		(x...) -> EchoPulse.fv!(x..., model, data; dmft = dmft), 
+        (x...) -> EchoPulse.fd!(x..., model, data; dmft = dmft), 
         EchoPulse.initial_condition(data; dmft = dmft), 
         (t0, tmax); 
-        dtini = 1e-6, 
         rtol = rtol, 
         atol = 1e-3 * rtol, 
+		dtini = 1e-10,
+		kmax_vie=6,
         callback = (x...) -> begin
-            EchoPulse.resize_Σ!(data)
+            EchoPulse.resize_Σ!(data; dmft = dmft)
             EchoPulse.calculate_Σt!(x..., model, data; dmft = dmft)
         end, 
         stop = (x...) -> begin
@@ -183,11 +194,12 @@ begin
         end)
 
     # Post processing
-    EchoPulse.resize_Σ!(data; resize = true)
-
-    # Calculate observables
-    (; Gd, Gc, G0γ, Gγ, Gγ_vac) = EchoPulse.project(data, model; ts = ts, ws = ws, dmft = dmft)
+    EchoPulse.resize_Σ!(data; resize = true, dmft = dmft)
 end;
+
+# ╔═╡ ba37be37-a4ea-49a5-9dba-0121a7703f47
+# Calculate observables
+(; Gd, Gc, G0γ, Gγ, Gγ_vac) = EchoPulse.project(data, model; ts = ts, ws = ws, dmft = dmft);
 
 # ╔═╡ 5feec3dd-f53d-4e67-8b1a-ca66131b17eb
 begin
@@ -208,16 +220,18 @@ begin
     ρc_t = (greater(Gc) - lesser(Gc))
     ργ_t = (greater(G0γ) - lesser(G0γ))
 
-    ρd_τ, (τs, Ts) = wigner_transform_itp(ρd_t, ts; fourier = false)#, len=ol)
-    ρd_ω, (ωs, Ts) = wigner_transform_itp(ρd_t, ts; fourier = true)#, len=ol)
-    ρc_ω, _ = wigner_transform_itp(ρc_t, ts; fourier = true)#, len=ol)
-    ργ_τ, _ = wigner_transform_itp(ργ_t, ts; fourier = false)#, len=ol)
+    ρd_τ, (τs, Ts) = EchoPulse.wigner_transform_itp(ρd_t, ts; fourier = false)#, len=ol)
+    ρd_ω, (ωs, Ts) = EchoPulse.wigner_transform_itp(ρd_t, ts; fourier = true)#, len=ol)
+    ρc_ω, _ = EchoPulse.wigner_transform_itp(ρc_t, ts; fourier = true)#, len=ol)
+    ργ_τ, _ = EchoPulse.wigner_transform_itp(ργ_t, ts; fourier = false)#, len=ol)
 
-	GdL_ω, _ = wigner_transform_itp(lesser(Gd), ts; fourier = true)
+	GdL_ω, _ = EchoPulse.wigner_transform_itp(lesser(Gd), ts; fourier = true)
 end;
 
 # ╔═╡ 59d727ac-5610-4443-9783-f1f4b69d863a
 let
+	Plots.gr()
+	
     # Spectral function
     h1 = heatmap(
         Ts,
@@ -257,12 +271,12 @@ let
         legend = :topleft,
         xlims = extrema(ts),
         minorticks = true,
-        # tick_direction = :out,
+        tick_direction = :out,
         xlabel = L"T\;D",
         rightmargin = 5Plots.mm,
         # minorgrid=true
     )
-	
+
     p1 = plot!(ts, imag(diag(-data.GbL.data)); 
     	label = L"n_b"
 	)
@@ -275,40 +289,39 @@ let
 	)
 
     # Kondo timescale
-    # vspan!(
-    #        Tγ .+ τK * [-1/2, 1/2];
-    #        fillcolor = my_colors[:ωK],
-    #        alpha = 0.3,
-    #        label = L"\tau_K",
-    # 	linewidth = 0,
-    #        markersize = 0,
-    # 	# xaxis = nothing,
-    #    )
+ #    vspan!(
+ #           tγ .+ τK * [-1/2, 1/2];
+ #           fillcolor = my_colors[:ωK],
+ #           alpha = 0.3,
+ #           label = L"\tau_K",
+ #    	linewidth = 0,
+ #           markersize = 0,
+ #    	# xaxis = nothing,
+ #       )
 
-    # twinx_ = twinx()
+ #    twinx_ = twinx()
 
-    # THz pulse
-    #    p1 = plot!(
-    #        twinx_,
-    #        ts,
-    # 	G0γ |> (-) ∘ imag ∘ diag ∘ lesser,
-    #        # G0γ |> (-) ∘ imag ∘ diag ∘ lesser;
-    #        label = L"n^0_\gamma",
-    #        line = (:green, 3.0, 0.2),
-    #        legend = :topright,
-    #        xlims = extrema(ts),
-    #        grid = false,
-    #        minorticks = true,
-    #        tick_direction = :out,
-    #        xaxis = nothing,
-    #    )
-    # p1 = plot!(
-    #        twinx_,
-    #        ts,
-    #        Gγ |> (-) ∘ imag ∘ diag ∘ lesser;
-    #        label = L"n_\gamma",
-    #        line = (:darkgreen, 1.0),
-    #    )
+ #    # THz pulse
+ #   p1 = plot!(
+	#    twinx_,
+	#    ts,
+	# G0γ |> (-) ∘ imag ∘ diag ∘ lesser,
+	#    label = L"n^0_\gamma",
+	#    line = (:green, 3.0, 0.2),
+	#    legend = :topright,
+	#    xlims = extrema(ts),
+	#    grid = false,
+	#    minorticks = true,
+	#    tick_direction = :out,
+	#    xaxis = nothing,
+ #   )
+ #    p1 = plot!(
+ #           twinx_,
+ #           ts,
+ #           Gγ |> (-) ∘ imag ∘ diag ∘ lesser;
+ #           label = L"n_\gamma",
+ #           line = (:darkgreen, 1.0),
+ #       )
     # p1 = plot!(
     #        twinx_,
     #        ts[2:end],
@@ -322,58 +335,46 @@ end
 
 # ╔═╡ 09f25d8b-7d87-45f7-9a42-68a3027485cf
 let
+	Plots.plotly()
+	
     plot(
         ts,
         -imag(diag(lesser(G0γ))),
-        label = L"n_\gamma^\mathrm{in}",
-        xlabel = L"T\;D",
-        line = (:darkgreen),
+		label="in",
+        # label = L"n_\gamma^\mathrm{in}",
+        # xlabel = L"T\;D",
+        line = (:green, 4.0, 0.5),
         ylims = (0.0, Nγ),
-        # legend=:right,
+        legend=:left,
         left_margin = 5Plots.mm,
         right_margin = 15Plots.mm,
         title = "Photon output",
     )
 
     plot!([], [], 
-        label = L"n_\gamma^\mathrm{out} - n_\gamma^\mathrm{in}", 
-        color = :orange
+		label="out",
+        # label = L"n_\gamma^\mathrm{out}", 
+        color = my_colors[:ω0]
     )
 
-    vspan!(Tγ .+ τK .* [-0.5, +0.5]; 
-        label = L"\tau_K", 
+    vspan!(tγ .+ τK .* [-0.5, +0.5]; 
+		label="Kondo timescale",
+        # label = L"\tau_K", 
         fillcolor = :grey, 
         alpha = 0.1, 
         linewidth = 0, 
         markersize = 0
     )
 
-    i0 = findmin(x -> abs(x), ts)[2]
+    i0 = findmin(abs, ts)[2]
 
-    # Gγ = -imag(diag((lesser(Gγ_out))))
-    # # Gγ = -imag(diag((lesser(Gγ_out) - lesser(G0γ))))
-    # plot!(twinx(), ts[i0:end], Gγ[i0:end];
-    # 	color=:blue,
-    # 	label=nothing, 
-    # 	ymirror = true,
-    # 	# ylims=(Gγ[end], maximum(Gγ))
-    # )
-
-	# Gγ = -imag(diag(lesser(Gγ)))
-    Gγ = -imag(diag(lesser(Gγ_vac)))
-    plot!(
-        twinx(),
-        ts[i0:end],
-        Gγ[i0:end];
-        color = :orange,
-        label = nothing,
-        ymirror = true,
-        # ylims=(Gγ[end], maximum(Gγ))
+    Gγ_ = -imag(diag((lesser(Gγ)))) .+ imag(lesser(Gγ)[i0,i0])
+    plot!(ts, Gγ_;
+    	color=my_colors[:ω0],
+    	# label=nothing, 
+		label="out",
+    	# ymirror = true,
     )
-
-    xlims!(0.0, ts[end])
-    # ylims!(0.0, 0.1)
-    # savefig("test.pdf")
 end
 
 # ╔═╡ a0ebd9bf-29a6-48c2-ae33-3aa8a25666ca
@@ -398,7 +399,7 @@ let
            linecolor = nothing,
        )
 
-    max_pulse_i = findmin(x -> abs(x - Tγ), ts)[2]
+    max_pulse_i = findmin(x -> abs(x - tγ), ts)[2]
 
     plot!(ωs, -imag(ρd_ω[:, max_pulse_i]); 
         label = L"-2\operatorname{Im}\,G^R_d(T_0,\omega)_{\tilde{\textrm{W}}}", 
@@ -434,6 +435,8 @@ end
 
 # ╔═╡ 0cd1b4c4-2e56-4027-95b5-24f801f5c04c
 let
+	Plots.gr()
+	
     Gd_τ = let
         f = EchoPulse.ft(ωs_eq, -2im * imag(GdRω); inverse = true)
         plot(f[1], imag(f[2]); 
@@ -449,7 +452,7 @@ let
         )
     end
 
-    max_pulse_i = findmin(x -> abs(x - Tγ), ts)[2]
+    max_pulse_i = findmin(x -> abs(x - tγ), ts)[2]
 
     Gd_τ = plot!(τs, -imag(ρd_τ[:, max_pulse_i]); 
         label = L"-2\operatorname{Im}\,G_d(T_0,\tau)", 
@@ -554,7 +557,38 @@ end
 # end
 
 # ╔═╡ 364199d9-a3f6-4f0f-8f63-60420b9da2c2
+# let
+# 	fd_ω, _ = wigner_transform_itp(im / 2 * (greater(Gd) + lesser(Gd)), ts; 
+# 		fourier=true, 
+# 		# len=ol
+# 	)
+	
+# 	max_pulse_i = findmin(x -> abs(x - Tγ), ts)[2]
+	
+# 	plot(ωs, (1/2 .+ im * (fd_ω ./ ρd_ω)[:,max_pulse_i]) |> real;
+# 		label = L"\mathcal{F}_\tau\{f_d(T_0,\tau)\}(\omega)", 
+# 		linecolor = my_colors[:dτ]
+# 	)
+	
+# 	# plot!(ωs, (1/2 .+ im * c_[:,max_pulse_i]) |> real;
+# 	# 	label=L"\mathcal{F}_\tau\{f_c(T_0,\tau)\}(\omega)", 
+# 	# 	linecolor=:darkgreen
+# 	# )
 
+# 	plot!(ωs, 1.0 ./ (exp.(β .* ωs) .+ 1); 
+#     		label=L"f_{eq}(\omega)", 
+#     		xlabel=L"\omega / D",
+# 			xlims=(ωs[1], ωs[end]),
+#     		legend=:topright,
+#     		line=(:dot, :grey)
+# 	)
+	
+# 	ylims!(-0.1, 1.1)
+# 	xlims!(-0.1,0.1)	
+# end
+
+# ╔═╡ 500d67f8-4893-4d5b-82b9-ea009eda2b18
+varinfo(@__MODULE__, imported=true)
 
 # ╔═╡ Cell order:
 # ╟─1cf881a4-ea46-11ec-3c1c-73c3deb8f624
@@ -565,10 +599,12 @@ end
 # ╟─21895ece-5cf4-4f6f-b851-44d4fefb1788
 # ╟─1ecc4622-b311-47bd-8ba0-d6effa01fa35
 # ╠═d12b32d7-4101-44c9-87b1-4ed1438decf7
+# ╠═ba37be37-a4ea-49a5-9dba-0121a7703f47
 # ╟─5feec3dd-f53d-4e67-8b1a-ca66131b17eb
 # ╟─59d727ac-5610-4443-9783-f1f4b69d863a
 # ╟─09f25d8b-7d87-45f7-9a42-68a3027485cf
 # ╟─a0ebd9bf-29a6-48c2-ae33-3aa8a25666ca
 # ╟─0cd1b4c4-2e56-4027-95b5-24f801f5c04c
 # ╟─96b7976d-5e96-4031-8f13-81f1fe14bfc3
-# ╠═364199d9-a3f6-4f0f-8f63-60420b9da2c2
+# ╟─364199d9-a3f6-4f0f-8f63-60420b9da2c2
+# ╠═500d67f8-4893-4d5b-82b9-ea009eda2b18

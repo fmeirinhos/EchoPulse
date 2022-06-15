@@ -3,10 +3,18 @@ using SpecialFunctions
 
 using NLsolve
 
-using KadanoffBaym, FFTW, Interpolations
+using KadanoffBaym 
+using LangrethsRules
+
+using FFTW
 using KadanoffBaym: ft
 
-using LangrethsRules
+using Interpolations
+using DataInterpolations: QuadraticInterpolation
+
+using Test
+
+LinearAlgebra.BLAS.set_num_threads(Threads.nthreads())
 
 include("utils.jl")
 include("model.jl")
