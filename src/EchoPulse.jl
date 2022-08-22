@@ -3,7 +3,7 @@ using SpecialFunctions
 
 using NLsolve
 
-using KadanoffBaym 
+using KadanoffBaym
 using LangrethsRules
 
 using FFTW
@@ -18,4 +18,5 @@ LinearAlgebra.BLAS.set_num_threads(Threads.nthreads())
 
 include("utils.jl")
 include("model.jl")
+include("eom.jl")
 include("nca.jl")

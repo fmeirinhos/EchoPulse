@@ -48,8 +48,8 @@ bethe_dos(ε) = abs(ε) <= 2 ? 1 / pi * sqrt(1 - (ε / 2)^2) : 0.0
 
 Interpolates `x` on an equidistant mesh with the same boundaries and length as `ts` and calls [`wigner_transform`](@ref)
 """
-function wigner_transform_itp(x::AbstractMatrix, ts::Vector; fourier=true)
-  ts_lin = range(first(ts), last(ts); length=length(ts))
-  itp = interpolate((ts, ts), x, Gridded(Linear()))
-  return wigner_transform([itp(t1, t2) for t1 in ts_lin, t2 in ts_lin]; ts=ts_lin, fourier=fourier)
+function wigner_transform_itp(x::AbstractMatrix, ts::Vector; fourier = true)
+    ts_lin = range(first(ts), last(ts); length = length(ts))
+    itp = interpolate((ts, ts), x, Gridded(Linear()))
+    return wigner_transform([itp(t1, t2) for t1 in ts_lin, t2 in ts_lin]; ts = ts_lin, fourier = fourier)
 end
