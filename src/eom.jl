@@ -1,6 +1,6 @@
-""" Calculates GR(ω) and G<(ω) in equilibrium """
+""" Calculates GR(ω) and G<(ω) """
 function calculate_Gω(ωs, model, data; dmft)
-    (; ΣRω, ΣLω, ΣcRω, GcRω_bath) = data
+    (; ΣRω, ΣLω, ΣcRω, ΣcKω, Gcω_bath) = data
 
     GRω = zero(ΣRω)
 
@@ -22,17 +22,22 @@ function calculate_Gω(ωs, model, data; dmft)
     GLω *= 2π / ((ωs[2] - ωs[1]) * sum(imag(-GLω[:, 1] + 2GLω[:, 2] - GLω[:, 3])))
 
     # DMFT sum over the Bethe lattice density-of-states
-    GcRω = let
-        x = ωs - ΣcRω - model.α^2 * GcRω_bath
-        @. 1 / 2 * (1 - sqrt(1 - 4 / x^2)) * x
+    Gcω = similar(Gcω_bath)
+    for i in eachindex(ωs) # Calculate Gloc
+        x = ωs[i] * I(2) - [ΣcRω[i] ΣcKω[i]; 0.0 conj(ΣcRω[i])] - model.α1^2 * Gcω_bath[i, :, :]
+        Gcω[i, :, :] = 1 / 2 * (I(2) - sqrt(I(2) - 4 * inv_RKA(x)^2)) * x
     end
 
     # Bethe-lattice "cavity" Green function
-    𝒢cRω = dmft ? inv.(ωs - GcRω - model.α^2 * GcRω_bath) : -im * π * bethe_dos.(ωs)
+    𝒢cω = similar(Gcω_bath)
+    for i in eachindex(ωs) # Calculate Gloc
+        𝒢cω[i, :, :] = inv_RKA(ωs[i] * I(2) - Gcω[i, :, :] - model.α1^2 * Gcω_bath[i, :, :])
+    end
 
-    return (; GRω, GLω, 𝒢cRω, GcRω)
+    return (; GRω, GLω, 𝒢cω, Gcω)
 end
 
+""" The rhs of ∂/∂t G<(t,t') and ∂/∂t G>(t,t') """
 function fv!(out, ts, w1, w2, t1, t2, model::PhotonAssistedAIM, data::PhotonAssistedAIMData; dmft)
     (; GfL, GfG, GbL, GbG, GaL, GaG, ΣfL, ΣfG, ΣbL, ΣbG, ΣaL, ΣaG, 𝒢cL, 𝒢cG, GcL, GcG, ΔcL, ΔcG, TcL, TcG) = data
 
@@ -59,12 +64,13 @@ function fv!(out, ts, w1, w2, t1, t2, model::PhotonAssistedAIM, data::PhotonAssi
         out[8] = -im * (∫dt1(ΔcG, ΔcL, 𝒢cG) - ∫dt2(ΔcG, 𝒢cG, 𝒢cL))
 
         out[9] = -im * (∫dt1(TcG, TcL, 𝒢cL) - ∫dt2(TcL, 𝒢cG, 𝒢cL) + ∫dt1(ΔcG, ΔcL, GcL) - ∫dt2(ΔcL, GcG, GcL))
-        out[10]= -im * (∫dt1(TcG, TcL, 𝒢cG) - ∫dt2(TcG, 𝒢cG, 𝒢cL) + ∫dt1(ΔcG, ΔcL, GcG) - ∫dt2(ΔcG, GcG, GcL))
+        out[10] = -im * (∫dt1(TcG, TcL, 𝒢cG) - ∫dt2(TcG, 𝒢cG, 𝒢cL) + ∫dt1(ΔcG, ΔcL, GcG) - ∫dt2(ΔcG, GcG, GcL))
     end
 
     return out
 end
 
+""" The rhs of (∂/∂t + ∂/∂t') G<(t,t') and (∂/∂t + ∂/∂t') G>(t,t') at t = t' """
 function fd!(out, ts, w1, w2, t1, t2, model::PhotonAssistedAIM, data::PhotonAssistedAIMData; dmft)
     fv!(out, ts, w1, w2, t1, t2, model, data, dmft = dmft)
     @. out -= conj(out)

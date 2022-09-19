@@ -53,3 +53,10 @@ function wigner_transform_itp(x::AbstractMatrix, ts::Vector; fourier = true)
     itp = interpolate((ts, ts), x, Gridded(Linear()))
     return wigner_transform([itp(t1, t2) for t1 in ts_lin, t2 in ts_lin]; ts = ts_lin, fourier = fourier)
 end
+
+# Inverts *fermionic* Green functions in the Retarded-Advanced-Keldysh representation
+@inline function inv_RKA(A)
+    newtype = eltype(A)
+    idet = inv(A[1] * A[4])
+    @inbounds return newtype[A[4]*idet -(A[3] * idet); zero(newtype) A[1]*idet]
+end

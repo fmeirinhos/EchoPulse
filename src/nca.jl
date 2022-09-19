@@ -52,8 +52,8 @@ function calculate_Σt!(ts, h1, h2, t1, t2, model::PhotonAssistedAIM, data::Phot
 
     TcG[t1, t2] = V2G * GdG
     TcL[t1, t2] = V2L * GdL
-    ΔcL[t1, t2] = dmft ? data.GcL[t1, t2] + model.α^2 * data.GcL_bath(ts[t1], ts[t2]) : 0.0
-    ΔcG[t1, t2] = dmft ? data.GcG[t1, t2] + model.α^2 * data.GcG_bath(ts[t1], ts[t2]) : 0.0
+    ΔcL[t1, t2] = dmft ? data.GcL[t1, t2] + model.α1^2 * data.GcL_bath(ts[t1], ts[t2]) : 0.0
+    ΔcG[t1, t2] = dmft ? data.GcG[t1, t2] + model.α1^2 * data.GcG_bath(ts[t1], ts[t2]) : 0.0
 
     TγL[t1, t2] = -im * 2model.Γ0^2 * (GdL * ~𝒢cG + 𝒢cL * ~GdG)
     TγG[t1, t2] = -im * 2model.Γ0^2 * (GdG * ~𝒢cL + 𝒢cG * ~GdL)
