@@ -75,20 +75,3 @@ function fd!(out, ts, w1, w2, t1, t2, model::PhotonAssistedAIM, data::PhotonAssi
     fv!(out, ts, w1, w2, t1, t2, model, data, dmft = dmft)
     @. out -= conj(out)
 end
-
-function f1!(out, ts, w1, t, model::PhotonAssistedAIM, data::PhotonAssistedAIMData)
-    (; ΣbG, ΣfG) = data
-    (; GbML, GbM, GfML, GfM, ΣbML, ΣbM, ΣfML, ΣfM) = data.mixed
-
-    ∫dt(A, B) = sum(w1[i] * A[t, i] * B[i, :] for i in eachindex(w1))
-
-    # light boson
-    out[1] = -im * (-model.ε0f * GbML[t] + ∫dt(ΣbG, GbML) + ΣbML[t] .* GbM[1] + conj(ΣbM[t]) .* GbML[1])
-    out[2] = -im * (-model.ε0f * GbM[t] + ∫dt(ΣbG, GbM) + ΣbM[t] .* GbM[1])
-
-    # pseudo fermion
-    out[3] = -im * (∫dt(ΣfG, GfML) + ΣfML[t] .* GfM[1] + conj(ΣfM[t]) .* GfML[1])
-    out[4] = -im * (∫dt(ΣfG, GfM) + ΣfM[t] .* GfM[1])
-
-    return out
-end

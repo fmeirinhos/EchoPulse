@@ -92,22 +92,3 @@ function project(data::PhotonAssistedAIMData, model::PhotonAssistedAIM; ts, ws, 
 
     (; Gd, Gc, 𝒢c, Gγ0, Gγ, Gγ_vac)
 end
-
-function calculate_Σ1!(ts, t, model::PhotonAssistedAIM, data::PhotonAssistedAIMData)
-    (; GbML, GbM, GfML, GfM) = data.mixed
-
-    GfGτ = ft(ωs, im * 2imag(GfM[t]); inverse = true)[2]
-    GfLτ = ft(ωs, im * 1imag(GfML[t]); inverse = true)[2]
-    GbGτ = ft(ωs, im * 2imag(GbM[t]); inverse = true)[2]
-    GbLτ = ft(ωs, im * 1imag(GbML[t]); inverse = true)[2]
-
-    ΣG1 = @. -2im * model.V0^2 * GG[:, 2] * ~𝒢cL
-    ΣG2 = @. +1im * model.V0^2 * (GG[:, 1] * 𝒢cG - GG[:, 3] * ~𝒢cL)
-    ΣG3 = @. +2im * model.V0^2 * GG[:, 2] * 𝒢cG
-    ΣL1 = @. -2im * model.V0^2 * GL[:, 2] * ~𝒢cG
-    ΣL2 = @. +1im * model.V0^2 * (GL[:, 1] * 𝒢cL - GL[:, 3] * ~𝒢cG)
-    ΣL3 = @. +2im * model.V0^2 * GL[:, 2] * 𝒢cL
-
-    # ΣRω = mapslices(x -> ft(τs, x .* Θτ; inverse = false)[2], ΣGτ; dims = 1)
-    # ΣLω = mapslices(x -> ft(τs, x; inverse = false)[2], ΣLτ; dims = 1)
-end
