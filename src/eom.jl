@@ -60,9 +60,11 @@ function fv!(out, ts, w1, w2, t1, t2, model::PhotonAssistedAIM, data::PhotonAssi
     out[6] = -im * (isinf(model.U0) ? 0.0 : (model.ε0f + model.U0) * GaG[t1, t2] + ∫dt1(ΣaG, GaG) - ∫dt2(ΣaG, GaG))
 
     if dmft
+        # weiss conduction electron
         out[7] = -im * (∫dt1(ΔcG, ΔcL, 𝒢cL) - ∫dt2(ΔcL, 𝒢cG, 𝒢cL))
         out[8] = -im * (∫dt1(ΔcG, ΔcL, 𝒢cG) - ∫dt2(ΔcG, 𝒢cG, 𝒢cL))
 
+        # local conduction electron
         out[9] = -im * (∫dt1(TcG, TcL, 𝒢cL) - ∫dt2(TcL, 𝒢cG, 𝒢cL) + ∫dt1(ΔcG, ΔcL, GcL) - ∫dt2(ΔcL, GcG, GcL))
         out[10] = -im * (∫dt1(TcG, TcL, 𝒢cG) - ∫dt2(TcG, 𝒢cG, 𝒢cL) + ∫dt1(ΔcG, ΔcL, GcG) - ∫dt2(ΔcG, GcG, GcL))
     end

@@ -7,10 +7,9 @@ using KadanoffBaym
 using LangrethsRules
 
 using FFTW
-using KadanoffBaym: ft
 
 using Interpolations
-using DataInterpolations: QuadraticInterpolation
+using LsqFit
 
 using Test
 
@@ -20,3 +19,4 @@ include("utils.jl")
 include("model.jl")
 include("eom.jl")
 include("nca.jl")
+include("solve.jl")

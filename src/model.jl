@@ -2,24 +2,32 @@
 Photon-assisted Anderson impurity model
 """
 Base.@kwdef mutable struct PhotonAssistedAIM{T<:AbstractFloat}
-    V0::T     # Hybridization strength
-    ε0f::T    # F-electron ground state energy
-    U0::T     # F-electron Coulomb repulsion
+    V0::T           # Hybridization strength
+    ε0f::T          # f-electron ground state energy
+    U0::T     = Inf # f-electron Coulomb repulsion
 
-    Γ0::T     # Photon hybridization strength
-    ω0::T     # Photon frequency
-    Ω0::T     # Photon width
+    α1::T     = 0.0 # Coupling to the thermal bath
+    α2::T     = 0.0 # Coupling to the photonic bath
+    cutoff::T = 0.0 # Photonic bath cutoff
 
-    α1::T     # Coupling to the thermal bath
-    α2::T     # Coupling to the photonic bath
+    Γ0::T           # Photon hybridization strength
+    ω0::T           # Photon central frequency
+    Ω0::T           # Photon spectral width
+
+    Nγ::T           # Photon pulse maximum average occupation
+    tγ::T           # Photon pulse peak time
 end
+
+# Non-interacting external photon Green functions
+GγL0_ext(t, t′; model) = (x = (model.ω0 - im * model.Ω0^2 * (t - t′) / 2) / model.Ω0; -im * (0 + model.Nγ * exp(-((t + t′) / 2 - model.tγ)^2 * model.Ω0^2)) * (1 + sqrt(pi) * x * (2exp(x^2) - erfcx(x))) / (1 + exp((model.ω0 / model.Ω0)^2) * sqrt(π) * model.ω0 / model.Ω0 * (1 + erf(model.ω0 / model.Ω0))))
+GγG0_ext(t, t′; model) = (x = (model.ω0 - im * model.Ω0^2 * (t - t′) / 2) / model.Ω0; -im * (1 + model.Nγ * exp(-((t + t′) / 2 - model.tγ)^2 * model.Ω0^2)) * (1 + sqrt(pi) * x * (2exp(x^2) - erfcx(x))) / (1 + exp((model.ω0 / model.Ω0)^2) * sqrt(π) * model.ω0 / model.Ω0 * (1 + erf(model.ω0 / model.Ω0))))
 
 """
 Data for solving the photon-assisted Anderson impurity model in non-equilibrium
 """
 struct PhotonAssistedAIMData{T<:Complex{<:AbstractFloat}}
-    𝒢cL::Any#::GreenFunction{T,2,Array{T,2},SkewHermitian} # Weiss field
-    𝒢cG::Any#::GreenFunction{T,2,Array{T,2},SkewHermitian} # Weiss field
+    𝒢cL::GreenFunction{T,2,Array{T,2},SkewHermitian} # Weiss field
+    𝒢cG::GreenFunction{T,2,Array{T,2},SkewHermitian} # Weiss field
     GcL::GreenFunction{T,2,Array{T,2},SkewHermitian} # Local field
     GcG::GreenFunction{T,2,Array{T,2},SkewHermitian} # Local field
 
@@ -33,12 +41,10 @@ struct PhotonAssistedAIMData{T<:Complex{<:AbstractFloat}}
     GaL::GreenFunction{T,2,Array{T,2},SkewHermitian}
     GaG::GreenFunction{T,2,Array{T,2},SkewHermitian}
 
-    GγL0::GreenFunction{T,2,Array{T,2},SkewHermitian}
-    GγG0::GreenFunction{T,2,Array{T,2},SkewHermitian}
     GγL0_ext::Function
     GγG0_ext::Function
-    GγL0_vac::Function
-    GγG0_vac::Function
+    GγL_bath::Function
+    GγG_bath::Function
 
     ΣfL::GreenFunction{T,2,Array{T,2},SkewHermitian}
     ΣfG::GreenFunction{T,2,Array{T,2},SkewHermitian}
@@ -59,134 +65,18 @@ struct PhotonAssistedAIMData{T<:Complex{<:AbstractFloat}}
     GdG::GreenFunction{T,2,Array{T,2},SkewHermitian}
 end
 
-function PhotonAssistedAIMData(; model::PhotonAssistedAIM, ωs, β, tγ, Nγ, timematrix, dmft, bath, nK = 2)
-    @assert isodd(length(ωs)) && first(ωs) == -last(ωs) "Must hold for double `ft` to be an identity."
+function PhotonAssistedAIMData(; data_eq, model::PhotonAssistedAIM, timematrix, dmft, nτK, rtol)
+    (; 𝒢cLτ, 𝒢cGτ, GcGτ, GcLτ, GLτ, GGτ, GcLτ_bath, GcGτ_bath, GγLτ_bath, GγGτ_bath, Στ, τs, τK) = data_eq
 
-    # Discrete Fourier grid of ωs
-    τs = ft(ωs, ωs; inverse = true)[1]
+    # Trim the initial timematrix to contain `nτK` Kondo time-scales `τK` or find τ = 0 index (corresponds to ∫dω)
+    r = let
+        # This is clamped to avoid running out of memory (5000-sized complex matrix of Float64s corresponds to ~500MB)
+        T = timematrix ? clamp(nτK * τK, nτK * τK, 5500 * (τs[2] - τs[1])) : 0
 
-    # Non-interacting electronic bath Green functions
-    GcL_bath = let
-        GγLτ = ft(ωs, +im * 2π * bethe_dos.(ωs) .* nf.(+ωs, β); inverse = true)[2]
-        itp = QuadraticInterpolation(GγLτ, τs)
-        (t, t′) -> itp(t - t′)
-    end
-    GcG_bath = let
-        GγGτ = ft(ωs, -im * 2π * bethe_dos.(ωs) .* nf.(-ωs, β); inverse = true)[2]
-        itp = QuadraticInterpolation(GγGτ, τs)
-        (t, t′) -> itp(t - t′)
-    end
-
-    # Non-interacting vacuum photon Green functions
-    cutoff = 0.3
-    cutoff_func = (ω -> ω < 0 ? 0.0 : ω < cutoff ? ω^2 : ω^2 * exp(-(ω - cutoff)^2 / cutoff)).(ωs) * inv(cutoff^3 / 3)
-
-    GγL0_vac = let
-        g = model.α2^2 * ft(ωs, -im * 2π * cutoff_func .* nb.(+ωs, β); inverse = true)[2]
-        itp = QuadraticInterpolation(g, τs)
-        (t, t′) -> itp(t - t′)
-    end
-    GγG0_vac = let
-        g = model.α2^2 * ft(ωs, +im * 2π * cutoff_func .* nb.(-ωs, β); inverse = true)[2]
-        itp = QuadraticInterpolation(g, τs)
-        (t, t′) -> itp(t - t′)
-    end
-
-    # Non-interacting external photon Green functions
-    GγL0_ext(t, t′) = -im * (0 + Nγ * exp(-2 * ((t + t′) / 2 - tγ)^2 * (model.Ω0)^2)) * (2 * model.Ω0 + sqrt(2π) * (model.ω0 - im * (t - t′) / 2 * model.Ω0^2) * (2exp((model.ω0 - im * (t - t′) / 2 * model.Ω0^2)^2 / (2model.Ω0^2)) - erfcx((model.ω0 - im * (t - t′) / 2 * model.Ω0^2) / (sqrt(2) * model.Ω0)))) / (2model.Ω0 + exp(model.ω0^2 / (2 * model.Ω0^2)) * sqrt(2π) * model.ω0 * (1 + erf(model.ω0 / (sqrt(2) * model.Ω0))))
-    GγG0_ext(t, t′) = -im * (1 + Nγ * exp(-2 * ((t + t′) / 2 - tγ)^2 * (model.Ω0)^2)) * (2 * model.Ω0 + sqrt(2π) * (model.ω0 - im * (t - t′) / 2 * model.Ω0^2) * (2exp((model.ω0 - im * (t - t′) / 2 * model.Ω0^2)^2 / (2model.Ω0^2)) - erfcx((model.ω0 - im * (t - t′) / 2 * model.Ω0^2) / (sqrt(2) * model.Ω0)))) / (2model.Ω0 + exp(model.ω0^2 / (2 * model.Ω0^2)) * sqrt(2π) * model.ω0 * (1 + erf(model.ω0 / (sqrt(2) * model.Ω0))))
-
-    # Solve the system in thermal equilibrium
-    (; GdRω, GcRω, 𝒢cRω, GγR0ω_ext, 𝒢cLτ, 𝒢cGτ, GLτ, GGτ, Στ, GcGτ, GcLτ, GγL0τ_ext, GγG0τ_ext, GdGτ, GdLτ) = let
-
-        # Proper Heaviside
-        Θτ = (τ -> τ > 0 ? 1 : τ == 0 ? 0.5 : 0.0).(τs)
-
-        # Initially (T ≤ 0) the photon field is *NOT* occupied: β → ∞
-        GγL0τ_ext = (τ -> GγL0_ext(+τ / 2, -τ / 2)).(τs)
-        GγG0τ_ext = (τ -> GγG0_ext(+τ / 2, -τ / 2)).(τs)
-        GγL0τ_vac = (τ -> GγL0_vac(+τ / 2, -τ / 2)).(τs)
-        GγG0τ_vac = (τ -> GγG0_vac(+τ / 2, -τ / 2)).(τs)
-
-        Gcω_bath = zeros(ComplexF64, length(ωs), 2, 2)
-        Gcω_bath[:, 1, 1] .= ft(τs, ft(ωs, -im * 2π * bethe_dos.(ωs); inverse = true)[2] .* Θτ; inverse = false)[2]
-        Gcω_bath[:, 2, 2] .= conj(Gcω_bath[:, 1, 1])
-        Gcω_bath[:, 1, 2] .= im * imag(2 * Gcω_bath[:, 1, 1]) .* (ω -> tanh(β * ω / 2)).(ωs)
-
-        function eq_loop(Στ)
-            # Σ>(τ) –> ΣR(ω) & Σ<(τ) –> Σ<(ω)
-            ΣRω = @views mapslices(x -> ft(τs, x .* Θτ; inverse = false)[2], Στ[:, 1:3]; dims = 1)
-            ΣLω = @views mapslices(x -> ft(τs, x; inverse = false)[2], Στ[:, 4:6]; dims = 1)
-            ΣcRω = @views ft(τs, Στ[:, 7] .* Θτ; inverse = false)[2]
-            ΣcLω = @views ft(τs, Στ[:, 8]; inverse = false)[2]
-            ΣcKω = im * imag(2 * (ΣcLω + im * imag(ΣcRω)))
-
-            (; GRω, GLω, 𝒢cω, Gcω) = calculate_Gω(ωs, model, (; ΣRω, ΣLω, ΣcRω, ΣcKω, Gcω_bath); dmft)
-
-            # GR(ω) –> G>(τ) & G<(ω) –> G<(τ)
-            GGτ = mapslices(x -> ft(ωs, +im * 2imag(x); inverse = true)[2], GRω; dims = 1)
-            GLτ = mapslices(x -> ft(ωs, +im * 1imag(x); inverse = true)[2], GLω; dims = 1)
-
-            𝒢cGτ = ft(ωs, bath ? im * imag(0.5 * 𝒢cω[:, 1, 2] + im * imag(𝒢cω[:, 1, 1])) : +im * 2imag(𝒢cω[:, 1, 1]) .* nf.(-ωs, β); inverse = true)[2]
-            𝒢cLτ = ft(ωs, bath ? im * imag(0.5 * 𝒢cω[:, 1, 2] - im * imag(𝒢cω[:, 1, 1])) : -im * 2imag(𝒢cω[:, 1, 1]) .* nf.(+ωs, β); inverse = true)[2]
-
-            (; ΣGτ, ΣLτ, GdGτ, GdLτ, TcGτ, TcLτ) = calculate_Στ(model, (; GGτ, GLτ, 𝒢cGτ, 𝒢cLτ, GγG0τ = GγG0τ_ext + GγG0τ_vac, GγL0τ = GγL0τ_ext + GγL0τ_vac))
-
-            TcRω = ft(τs, (TcGτ - TcLτ) .* Θτ; inverse = false)[2]
-            TcKω = im * imag(ft(τs, (TcGτ + TcLτ); inverse = false)[2])
-
-            Σcω = similar(Gcω_bath)
-            for i in eachindex(ωs)
-                Tcω = [TcRω[i] TcKω[i]; 0.0 conj(TcRω[i])]
-                Σcω[i, :, :] = Tcω * inv_RKA(I(2) + 𝒢cω[i, :, :] * Tcω)
-            end
-
-            Σcρτ = ft(ωs, im * imag(2 * Σcω[:, 1, 1]); inverse = true)[2]
-            ΣcLτ = ft(ωs, im * imag(0.5 * Σcω[:, 1, 2] - im * imag(Σcω[:, 1, 1])); inverse = true)[2]
-
-            # Extras
-            GcGτ = ft(ωs, im * imag(0.5 * Gcω[:, 1, 2] + im * imag(Gcω[:, 1, 1])); inverse = true)[2]
-            GcLτ = ft(ωs, im * imag(0.5 * Gcω[:, 1, 2] - im * imag(Gcω[:, 1, 1])); inverse = true)[2]
-
-            GdRω = ft(τs, (GdGτ - GdLτ) .* Θτ; inverse = false)[2]
-            GγR0ω_ext = ft(τs, (GγG0τ_ext - GγL0τ_ext) .* Θτ; inverse = false)[2]
-
-            (; Στ = hcat(ΣGτ, ΣLτ, Σcρτ, ΣcLτ), GdRω, GcRω = Gcω[:, 1, 1], 𝒢cRω = 𝒢cω[:, 1, 1], GγR0ω_ext, 𝒢cLτ, 𝒢cGτ, GLτ, GGτ, GcGτ, GcLτ, GγL0τ_ext, GγG0τ_ext, GdGτ, GdLτ)
+        if T < nτK * τK
+            @warn "Under-estimated initial matrix by $(1 - T / (nτK * τK))"
         end
-
-        # initial guess
-        x0 = ft(ωs, -im * 2π * bethe_dos.(ωs); inverse = true)[2]
-
-        # Solve equilibrium problem
-        fixed_point(first ∘ eq_loop, hcat(x0, x0, x0, -x0, x0, x0, x0, -x0)) |> eq_loop
-    end
-
-    # Determine Kondo energy
-    ωK, τK = let
-        # ω = 0 (corresponds to ∫dτ)
-        ρω0 = -1 / (2π) * imag((τs[2] - τs[1]) * sum(𝒢cGτ - 𝒢cLτ))
-
-        D = 2 # half-bandwidth of a Bethe lattice
-        N = 2 # spin degeneracy
-        W0 = model.V0^2 * ρω0
-        ωK = D * (N * W0 / D)^(1 / N) * exp(model.ε0f / (N * W0))
-        (; ωK, τK = inv(ωK))
-    end
-
-    # Determine size of the time-matrix to consider
-    if timematrix
-        # Trim the time-grid to contain 4 Kondo time-scales
-        r = let
-            # This is clamped because if ωK is too small we can run out of memory
-            τK_approx = inv(clamp(ωK, 2e-3, ωK))
-            if τK_approx < τK
-                @warn "Under-estimated initial matrix by $(1 - τK_approx/τK)"
-            end
-            argmin(abs.(τs .+ nK * τK_approx)):1:argmin(abs.(τs .- nK * τK_approx))
-        end
-    else
-        # Find τ = 0 index (corresponds to ∫dω)
-        r = argmin(abs.(τs)):argmin(abs.(τs))
+        argmin(abs.(τs .+ T / 2)):argmin(abs.(τs .- T / 2))
     end
 
     GcL = GreenFunction(G∞(GcLτ[r]), SkewHermitian)
@@ -200,11 +90,11 @@ function PhotonAssistedAIMData(; model::PhotonAssistedAIM, ωs, β, tγ, Nγ, ti
         end
     else
         𝒢cL = let
-            itp = QuadraticInterpolation(𝒢cLτ, τs)
+            itp = extrapolate(interpolate((τs,), 𝒢cLτ, Gridded(Linear())), 0.0)
             (t, t′) -> itp(t - t′)
         end
         𝒢cG = let
-            itp = QuadraticInterpolation(𝒢cGτ, τs)
+            itp = extrapolate(interpolate((τs,), 𝒢cGτ, Gridded(Linear())), 0.0)
             (t, t′) -> itp(t - t′)
         end
     end
@@ -218,14 +108,29 @@ function PhotonAssistedAIMData(; model::PhotonAssistedAIM, ωs, β, tγ, Nγ, ti
     GaL = GreenFunction(G∞(GLτ[r, 3]), SkewHermitian)
     GaG = GreenFunction(G∞(GGτ[r, 3]), SkewHermitian)
 
-    GγL0 = GreenFunction(G∞(GγL0τ_ext[r]), SkewHermitian)
-    GγG0 = GreenFunction(G∞(GγG0τ_ext[r]), SkewHermitian)
+    GcL_bath = let
+        itp = extrapolate(interpolate((τs,), GcLτ_bath, Gridded(Linear())), 0.0)
+        (t, t′) -> itp(t - t′)
+    end
+    GcG_bath = let
+        itp = extrapolate(interpolate((τs,), GcGτ_bath, Gridded(Linear())), 0.0)
+        (t, t′) -> itp(t - t′)
+    end
+
+    GγL_bath = let
+        itp = extrapolate(interpolate((τs,), GγLτ_bath, Gridded(Linear())), 0.0)
+        (t, t′) -> itp(t - t′)
+    end
+    GγG_bath = let
+        itp = extrapolate(interpolate((τs,), GγGτ_bath, Gridded(Linear())), 0.0)
+        (t, t′) -> itp(t - t′)
+    end
 
     # Initial (equidistant) time-grid, ending at t = 0.0
     t0 = range(stop = 0.0, length = size(GaL, 1), step = τs[2] - τs[1]) |> collect
     @assert length(t0) == size(GbL, 1)
 
-    data = PhotonAssistedAIMData(𝒢cL, 𝒢cG, GcL, GcG, GcL_bath, GcG_bath, GfL, GfG, GbL, GbG, GaL, GaG, GγL0, GγG0, GγL0_ext, GγG0_ext, GγL0_vac, GγG0_vac, zero(GfL), zero(GfG), zero(GbL), zero(GbG), zero(GaL), zero(GaG), zero(GaL), zero(GaG), zero(GbL), zero(GbG), zero(GbL), zero(GbG), zero(GfL), zero(GfG))
+    data = PhotonAssistedAIMData(𝒢cL, 𝒢cG, GcL, GcG, GcL_bath, GcG_bath, GfL, GfG, GbL, GbG, GaL, GaG, (t, t′) -> GγL0_ext(t, t′; model = model), (t, t′) -> GγG0_ext(t, t′; model = model), GγL_bath, GγG_bath, zero(GfL), zero(GfG), zero(GbL), zero(GbG), zero(GaL), zero(GaG), zero(GaL), zero(GaG), zero(GbL), zero(GbG), zero(GbL), zero(GbG), zero(GfL), zero(GfG))
 
     # Initialize self-energies
     for t1 in eachindex(t0), t2 in eachindex(t0)
@@ -246,31 +151,31 @@ function PhotonAssistedAIMData(; model::PhotonAssistedAIM, ωs, β, tγ, Nγ, ti
         end
 
         @testset "Self-energies" begin
-            @test data.ΣbG.data ≈ G∞(Στ[r, 1]) atol = 5e-7
-            @test data.ΣfG.data ≈ G∞(Στ[r, 2]) atol = 5e-7
-            @test data.ΣaG.data ≈ G∞(Στ[r, 3]) atol = 5e-7
-            @test data.ΣbL.data ≈ G∞(Στ[r, 4]) atol = 5e-7
-            @test data.ΣfL.data ≈ G∞(Στ[r, 5]) atol = 5e-7
-            @test data.ΣaL.data ≈ G∞(Στ[r, 6]) atol = 5e-7
+            @test data.ΣbG.data ≈ G∞(Στ[r, 1]) rtol = rtol atol = 1e-3 * rtol
+            @test data.ΣfG.data ≈ G∞(Στ[r, 2]) rtol = rtol atol = 1e-3 * rtol
+            @test data.ΣaG.data ≈ G∞(Στ[r, 3]) rtol = rtol atol = 1e-3 * rtol
+            @test data.ΣbL.data ≈ G∞(Στ[r, 4]) rtol = rtol atol = 1e-3 * rtol
+            @test data.ΣfL.data ≈ G∞(Στ[r, 5]) rtol = rtol atol = 1e-3 * rtol
+            @test data.ΣaL.data ≈ G∞(Στ[r, 6]) rtol = rtol atol = 1e-3 * rtol
         end
 
         if timematrix
             @testset "Occupations rhs" begin
-                # These are the hardest to fulfill since they require the initial time-matrix
+                # These are the hardest to fulfill since they require the initial timematrix
                 # to be good enough to substitute the use of mixed Green functions.
                 # If not satisfied, it usually suffices to increase the *boundaries* of the frequency grid
                 # since they control how fine Δτ is. If the temperature is very low, it is also a good idea
-                # to increase the number of Kondo time-scales to include in the initial time-matrix
-                @test sum(~Στ[r, 1] .* GLτ[r, 1] - ~Στ[r, 4] .* GGτ[r, 1]) * (τs[2] - τs[1]) ≈ 0.0 atol = 5e-7
-                @test sum(~Στ[r, 2] .* GLτ[r, 2] - ~Στ[r, 5] .* GGτ[r, 2]) * (τs[2] - τs[1]) ≈ 0.0 atol = 5e-7
+                # to increase the number `nK` of Kondo time-scales included in the initial timematrix
+                @test sum(~Στ[r, 1] .* GLτ[r, 1] - ~Στ[r, 4] .* GGτ[r, 1]) * (τs[2] - τs[1]) ≈ sum(~Στ[:, 1] .* GLτ[:, 1] - ~Στ[:, 4] .* GGτ[:, 1]) * (τs[2] - τs[1]) rtol = rtol atol = 1e-3 * rtol
+                @test sum(~Στ[r, 2] .* GLτ[r, 2] - ~Στ[r, 5] .* GGτ[r, 2]) * (τs[2] - τs[1]) ≈ sum(~Στ[:, 2] .* GLτ[:, 2] - ~Στ[:, 5] .* GGτ[:, 2]) * (τs[2] - τs[1]) rtol = rtol atol = 1e-3 * rtol
             end
         end
     end
 
-    return (; GdRω, GcRω, 𝒢cRω, GγR0ω_ext, ωK, τK, data, t0, 𝒢cLτ, 𝒢cGτ, GLτ, GGτ, GdGτ, GdLτ)
+    return (; data, t0)
 end
 
-function resize_Σ!(data::PhotonAssistedAIMData; dmft, resize = false)
+function resize_Σ!(data::PhotonAssistedAIMData; resize = false)
     if (n = size(data.GfL, 2)) > size(data.ΣfL, 2) || resize
         resize!(data.ΣbL, n)
         resize!(data.ΣbG, n)
@@ -284,17 +189,10 @@ function resize_Σ!(data::PhotonAssistedAIMData; dmft, resize = false)
         resize!(data.TcL, n)
         resize!(data.TcG, n)
 
-        resize!(data.GγL0, n)
-        resize!(data.GγG0, n)
         resize!(data.TγL, n)
         resize!(data.TγG, n)
 
         resize!(data.GdL, n)
         resize!(data.GdG, n)
     end
-end
-
-function initial_condition(data::PhotonAssistedAIMData; dmft)
-    u0 = [data.GbL, data.GbG, data.GfL, data.GfG, data.GaL, data.GaG]
-    return dmft ? [u0; [data.𝒢cL, data.𝒢cG, data.GcL, data.GcG]] : u0
 end

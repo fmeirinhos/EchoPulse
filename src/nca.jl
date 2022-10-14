@@ -1,7 +1,7 @@
-""" ~: -A(τ)^* = A(-τ) """
+""" ~: -A≷(τ)^* = A≷(-τ) """
 ~(a) = -conj(a)
 
-""" Calculates the NCA Σ>(τ) and Σ<(τ) in equilibrium """
+""" Calculates the NCA Σ≷(τ) in equilibrium """
 function calculate_Στ(model, data)
     (; 𝒢cGτ, 𝒢cLτ, GγG0τ, GγL0τ, GGτ, GLτ) = data
 
@@ -24,18 +24,15 @@ function calculate_Στ(model, data)
     return (; ΣGτ = hcat(ΣbG, ΣfG, ΣaG), ΣLτ = hcat(ΣbL, ΣfL, ΣaL), GdGτ, GdLτ, TcGτ, TcLτ)
 end
 
-""" Calculates the NCA Σ>(t,t') and Σ<(t,t') in non-equilibrium """
+""" Calculates the NCA Σ≷(t, t') in non-equilibrium """
 function calculate_Σt!(ts, h1, h2, t1, t2, model::PhotonAssistedAIM, data::PhotonAssistedAIMData; dmft)
-    (; GfL, GfG, GbL, GbG, GaL, GaG, ΣaL, ΣaG, ΣfL, ΣfG, ΣbL, ΣbG, TcL, TcG, ΔcL, ΔcG, TγL, TγG, GγL0, GγG0, 𝒢cL, 𝒢cG, GdL, GdG) = data
+    (; GfL, GfG, GbL, GbG, GaL, GaG, ΣaL, ΣaG, ΣfL, ΣfG, ΣbL, ΣbG, TcL, TcG, ΔcL, ΔcG, TγL, TγG, 𝒢cL, 𝒢cG, GdL, GdG) = data
 
     𝒢cL = dmft ? 𝒢cL[t1, t2] : 𝒢cL(ts[t1], ts[t2])
     𝒢cG = dmft ? 𝒢cG[t1, t2] : 𝒢cG(ts[t1], ts[t2])
 
-    GγL0 = GγL0[t1, t2] = data.GγL0_ext(ts[t1], ts[t2])
-    GγG0 = GγG0[t1, t2] = data.GγG0_ext(ts[t1], ts[t2])
-
-    GγL0 += data.GγL0_vac(ts[t1], ts[t2])
-    GγG0 += data.GγG0_vac(ts[t1], ts[t2])
+    GγL0 = data.GγL0_ext(ts[t1], ts[t2]) + model.α2^2 * data.GγL_bath(ts[t1], ts[t2])
+    GγG0 = data.GγG0_ext(ts[t1], ts[t2]) + model.α2^2 * data.GγG_bath(ts[t1], ts[t2])
 
     V2G = model.V0^2 + im * model.Γ0^2 * (GγG0 + ~GγL0)
     V2L = model.V0^2 + im * model.Γ0^2 * (GγL0 + ~GγG0)
@@ -61,34 +58,35 @@ function calculate_Σt!(ts, h1, h2, t1, t2, model::PhotonAssistedAIM, data::Phot
 end
 
 function project(data::PhotonAssistedAIMData, model::PhotonAssistedAIM; ts, ws, dmft)
-    (; GdL, GdG, 𝒢cL, 𝒢cG, GcL, GcG, GγL0, GγG0, TcL, TcG, TγL, TγG) = data
+    (; GdL, GdG, 𝒢cL, 𝒢cG, GcL, GcG, GγL0_ext, GγG0_ext, GγL_bath, GγG_bath, TcL, TcG, TγL, TγG) = data
 
     # Pre-compute expensive convolution weight matrix from kbsolve!'s weights
     dts = reduce(hcat, [[w; zeros(length(ts) - length(w))] for w in ws.ws])
+    ⋆(a, b) = conv(a, b, dts)
 
     # d-electron
-    Gd = TimeOrderedGreenFunction(GdL.data, GdG.data, dts)
+    Gd = TimeOrderedGreenFunction(GdL.data, GdG.data)
 
     # c-electron t-matrix
-    Tc = TimeOrderedGreenFunction(TcL.data, TcG.data, dts)
+    Tc = TimeOrderedGreenFunction(TcL.data, TcG.data)
 
     # free c-electron
-    𝒢c = dmft ? TimeOrderedGreenFunction(𝒢cL.data, 𝒢cG.data, dts) : TimeOrderedGreenFunction(𝒢cL.(ts', ts), 𝒢cG.(ts', ts), dts)
+    𝒢c = dmft ? TimeOrderedGreenFunction(𝒢cL.data, 𝒢cG.data) : TimeOrderedGreenFunction(𝒢cL.(ts, ts'), 𝒢cG.(ts, ts'))
 
     # full c-electron
-    Gc = dmft ? TimeOrderedGreenFunction(GcL.data, GcG.data, dts) : 𝒢c + 𝒢c * Tc * 𝒢c
+    Gc = dmft ? TimeOrderedGreenFunction(GcL.data, GcG.data) : 𝒢c + 𝒢c ⋆ Tc ⋆ 𝒢c
 
     # photon t-matrix
-    Tγ = TimeOrderedGreenFunction(TγL.data, TγG.data, dts)
+    Tγ = TimeOrderedGreenFunction(TγL.data, TγG.data)
 
     # free photon
-    Gγ0 = TimeOrderedGreenFunction(GγL0.data, GγG0.data, dts)
+    Gγ0_ext = TimeOrderedGreenFunction(GγL0_ext.(ts, ts'), GγG0_ext.(ts, ts'))
 
     # full photon
-    Gγ = Gγ0 + Gγ0 * Tγ * Gγ0
+    Gγ_ext = Gγ0_ext + Gγ0_ext ⋆ Tγ ⋆ Gγ0_ext
 
-    Gγ0_vac = TimeOrderedGreenFunction(data.GγL0_vac.(ts', ts), data.GγG0_vac.(ts', ts), dts)
-    Gγ_vac = Gγ0_vac + Gγ0_vac * Tγ * Gγ0_vac
+    Gγ0_vac = TimeOrderedGreenFunction(GγL_bath.(ts, ts'), GγG_bath.(ts, ts'))
+    Gγ_vac = Gγ0_vac + Gγ0_vac ⋆ Tγ ⋆ Gγ0_vac
 
-    (; Gd, Gc, 𝒢c, Gγ0, Gγ, Gγ_vac)
+    (; Gd, Gc, 𝒢c, Gγ0_ext, Gγ_ext, Gγ_vac)
 end
