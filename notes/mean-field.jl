@@ -1,88 +1,128 @@
 ### A Pluto.jl notebook ###
-# v0.19.6
+# v0.19.18
 
 using Markdown
 using InteractiveUtils
+
+# ╔═╡ 22f5d22d-c092-4b44-a2da-af78f1978c8a
+begin
+	using Plots, LaTeXStrings
+
+	Plots.gr()
+
+	# Plots.default()
+	Plots.default(
+		fontfamily = "Computer Modern",
+		background_color_legend = nothing,
+		foreground_color_legend = nothing,
+		tick_direction = :in,
+		minorticks = true,
+		framestyle = :box,
+		size = (600, 450),
+		titlefontsize = 16,
+		guidefontsize = 11,
+		legendfontsize = 9,
+		tickfontsize = 9,
+		grid = true,
+		)
+
+	my_colors = Dict(
+		:c => Plots.Colors.colorant"#0C5DA5", 
+		:dω => Plots.Colors.colorant"#FF9500",
+		:dτ => Plots.Colors.colorant"#00B945",
+		:ωK => Plots.Colors.colorant"#9e9e9e",
+		:εd => Plots.Colors.colorant"#845B97",
+		:ω0 => Plots.Colors.colorant"#FF2C00"
+		)
+end;
+
+# ╔═╡ a9e98579-eaa0-45f5-8353-065e05a3e093
+function ingredients(path::String)
+    # this is from the Julia source code (evalfile in base/loading.jl)
+    # but with the modification that it returns the module instead of the last object
+    name = Symbol(basename(path))
+    m = Module(name)
+    Core.eval(
+        m,
+        Expr(
+            :toplevel,
+            :(eval(x) = $(Expr(:core, :eval))($name, x)),
+            :(include(x) = $(Expr(:top, :include))($name, x)),
+            :(include(mapexpr::Function, x) = $(Expr(:top, :include))(mapexpr, $name, x)),
+            :(include($path)),
+        ),
+    )
+    m
+end;
 
 # ╔═╡ f2b6c08c-29ed-11eb-2363-6143e3b233a5
 begin
 	using Pkg; Pkg.activate()
 
 	using StaticArrays
-	using GenericLinearAlgebra, LinearAlgebra
+	using LinearAlgebra # GenericLinearAlgebra, 
 
 	using ForwardDiff
 
 	import NLsolve
 	nlsolve(f, x0; ftol=1e-12) = NLsolve.nlsolve(f, x0; 
-		method=:newton, autodiff=:forward, 
-		ftol=ftol, iterations=20,
-		inplace=false, show_trace=true)
+		method=:newton, 
+		autodiff=:forward, 
+		ftol=ftol, 
+		iterations=20,
+		inplace=false, 
+		show_trace=true)
 
-	using Interpolations
+	const EchoPulse = ingredients("../src/EchoPulse.jl")
+	
 	using DifferentialEquations
-
-	using Plots, LaTeXStrings
+	using Serialization
 end
 
 # ╔═╡ 25366804-7db3-4672-8c80-2d762e6b6675
 begin
-	using FFTW, KadanoffBaym
-	using QuadGK, SpecialFunctions
-	using HCubature: hcubature
-
-	dim = 3
-	N = 2^16
-
-	rtol=1e-6
-	atol=1e-10
-
+	# using HCubature: hcubature
 	# k-integral
-	∫dk(f) = hcubature(f, repeat([-π], dim), repeat([π], dim); rtol=rtol, atol=atol)[1] / (2π)^dim
+	# ∫dk(f; dim = 3) = hcubature(f, repeat([-π], dim), repeat([π], dim); rtol=1e-3, atol=1e-6)[1] / (2π)^dim
 
-	dos = let
-		ωs = collect(range(-2dim, +2dim, length=N-1))
-		ts = KadanoffBaym.ft(ωs, ωs)[1]
-
-		(ωs, ρs) = KadanoffBaym.ft(ts, besselj0.(2ts) .^ dim; inverse=true)
-
-		interpolate((collect(ωs), ), real(ρs), Gridded(Linear()))
-	end
-
-	# dos-integral
-	∫dε(f) = quadgk(ε -> f(ε) * dos(ε), -2dim, +2dim, rtol=rtol, atol=atol)[1]
+	bethe_dos(ε) = 1 / pi * sqrt(1 - (ε / 2)^2)
+	εs = range(-2.0, 2.0, length=2^9)
+	∫dε(f) = sum(f(ε) * bethe_dos(ε) for ε in εs) * (εs[2] - εs[1])
+	∫dεi(f) = sum(f(i) * bethe_dos(ε) for (i, ε) in enumerate(εs)) * (εs[2] - εs[1])
 end
 
 # ╔═╡ ba6ea9f1-2d8f-4853-b433-9825aef236a9
 begin
-	"""
-	Cubic Anderson model parameters (units of tc)
-	"""
-	Base.@kwdef mutable struct PAM
-		V0::Float64         # Hybridization strength
-		tf::Float64         # F-electron hopping
-		ε0f::Float64        # F-electron ground state e
-		μ::Float64 = 0.0    # Chemical potential
+	# """
+	# Cubic Anderson model parameters (units of tc)
+	# """
+	# Base.@kwdef mutable struct PAM
+	# 	V0::Float64         # Hybridization strength
+	# 	tf::Float64         # F-electron hopping
+	# 	ε0f::Float64        # F-electron ground state e
+	# 	μ::Float64 = 0.0    # Chemical potential
 
-		Γ0::Float64 = 0.0   # Photon hybridization strength
-		ω0::Float64 = 0.0   # Photon frequency
-		Ω0::Float64 = 0.0   # Photon width
-		tc::Float64 = 0.0   # Photon incidence time
-	end
+	# 	Γ0::Float64 = 0.0   # Photon hybridization strength
+	# 	ω0::Float64 = 0.0   # Photon frequency
+	# 	Ω0::Float64 = 0.0   # Photon width
+	# 	tγ::Float64 = 0.0   # Photon incidence time
+	# 	Nγ::Float64 = 0.0   # Photon pulse occupation
+	# end
 
 	"""
 	Aux-boson mean-field Hamiltonian
 	"""
-	function H(k::SVector, p::PAM, b, λ; t=0.0)
+	function H(k::SVector, p, b, λ)
 		c = -2.0 * sum(cos, k) - p.μ
 		f = -2.0p.tf * sum(cos, k) * abs2(b) + λ - p.μ
 		h = p.V0 * b
 		return @SMatrix [c h'; h f]
 	end
 
-	function H(ε::Float64, p::PAM, b, λ; t=0.0)
-		c = ε - p.μ
-		f = p.tf * abs2(b) * ε + λ - p.μ
+	function H(ε::Float64, p, b, λ)
+		c = ε #- p.μ
+		f = λ #- p.μ
+		# f = p.tf * abs2(b) * ε + λ - p.μ
 		h = p.V0 * b
 		return @SMatrix [c h'; h f]
 	end
@@ -90,7 +130,7 @@ begin
 	"""
 	Effective action at T -> 0
 	"""
-	function Seff(x::Vector, p::PAM)
+	function Seff(x::Vector, p)
 		b, λ = x
 
 		# The factor of 2 accounts for spin-degeneracy
@@ -104,19 +144,9 @@ begin
 	"""
 	Saddle-point equations at T -> 0
 	"""
-	function saddle_points(x::Vector, p::PAM)
+	function saddle_points(x::Vector, p)
 		return ForwardDiff.gradient(y -> Seff(y, p), x)
 	end
-end;
-
-# ╔═╡ 31fa9f1e-25c0-11eb-39ff-492bb3e7c011
-begin
-	# Model
-	pam = PAM(V0=1.0, tf=-0.0, ε0f=-1.5)
-
-	# Find the fields that minimize the Free Energy
-	@time sol = nlsolve(x -> saddle_points(x, pam), [2.5e-1, 2.0e-1])
-	@info sol
 end;
 
 # ╔═╡ 31f97be0-2a6e-11eb-3f71-1f370f449c07
@@ -124,17 +154,19 @@ begin
 	"""
 	Auxiliary-boson saddle-point occupation of the fermionic fields
 	"""
-	function GL0(ε::Float64, p::PAM, b::Number, λ::Number)
-	    c = ε - p.μ
-	    f = p.tf * abs2(b) * ε + λ - p.μ
+	function GL0(ε::Float64, p, b::Number, λ::Number)
+	    c = ε #- p.μ
+		f = λ #- p.μ
+	    # f = p.tf * abs2(b) * ε + λ - p.μ
 	    h = (p.V0 * b)
 
 	    σ = 0.5 * (c + f)
 	    δ = 0.5 * (c - f)
 	    Δ = sqrt(δ^2 + abs2(h))
-	    return +im * @SMatrix [1 - δ/Δ -h'/Δ; -h/Δ 1 + δ/Δ]
+	    # return +im * @SMatrix [1 - δ/Δ -h'/Δ; -h/Δ 1 + δ/Δ]
+		return +im * [1 - δ/Δ -h'/Δ; -h/Δ 1 + δ/Δ]
 	end
-	function GL0(k::SVector, p::PAM, b::Number, λ::Number)
+	function GL0(k::SVector, p, b::Number, λ::Number)
 	    c = -2.0 * sum(cos, k) - p.μ
 	    f = -2.0p.tf * sum(cos, k) * abs2(b) + λ - p.μ
 	    h = (p.V0 * b)
@@ -144,213 +176,198 @@ begin
 	    Δ = sqrt(δ^2 + abs2(h))
 	    return +im * @SMatrix [1 - δ/Δ -h'/Δ; -h/Δ 1 + δ/Δ]
 	end
+end;
 
-	"""
-	G<(t,t) of the matter fields
-	"""
-	function GL(t::Number, ε::Float64, p::PAM, b, λ)
-	    T = promote_type(typeof(t), typeof(λ(t)))
-	    
-	    u0 = GL0(ε, p, b(0.0), λ(0.0))
-	    
-	    if iszero(t)
-	        return u0
-	    else
-	        return solve(
-	            ODEProblem(
-	                (u,_,t) -> (o = -1.0im * H(ε,p,b(t),λ(t);t=t) * u; o - o'), 
-	                u0,
-	                T.((0.0, t - eps(t)))
-	                ), Tsit5(), reltol=1e-6, abstol=1e-10)[end]
+# ╔═╡ e7d8ca15-dd35-4505-b39a-17325d4e7762
+begin
+	function _solve(pam; tmax, kwargs...)	
+	    """
+	    Non-equilibrium saddle-point equations
+	    """
+	    function sp_neq(du, u, _, t)
+			λ = u[1]
+	        b = u[2] + im * u[3]
+			
+			G = reshape(reinterpret(ComplexF64, u[4:end]), 2, 2, :)
+			
+	        n = ∫dεi(i -> begin
+	            g = G[:, :, i]
+	
+	            α = g[2,1] * b + g[1,2] * b' 
+	            dαdb = g[1,2] + pam.V0 * (g[1,1] * g[2,2] * b + g[1,2] * g[1,2] * b')
+	            dαdλ = g[2,2] * α
+	
+	            @SVector [g[1,2], g[2,2], α, dαdb, dαdλ]
+	        end)
+
+			gγ = t * EchoPulse.GγL0_ext(t, t; model = pam)
+
+			dλ = 1 - abs2(b) + im * n[2]
+	        dλ+= 2pam.Γ0^2 * gγ * n[3] * n[5]
+
+	        db = -im * ((λ - pam.ε0f) * b - im * (pam.V0 * n[1]))
+	    	db+= -im * 2pam.Γ0^2 * gγ * n[3] * n[4]
+
+			du[1] = real(dλ)
+			du[2] = real(db)
+			du[3] = imag(db)
+			
+			_dG = @views reinterpret(ComplexF64, du[4:end])
+			dG = reshape(_dG, 2, 2, length(εs))
+
+			for (i, ε) in enumerate(εs)
+				dG[:,:,i] .= (o = -1.0im * H(ε, pam, b, λ) * G[:,:,i]; o - o')
+			end
+
+			return du
 	    end
+	
+		# Find the fields that minimize the Free Energy
+		# TODO: solve equations with a complex b (composed of two real components)
+		# For some reason the time-evolution is unstable when imag(b) > 0
+		@time sol = nlsolve(x -> saddle_points(x, pam), [2.5e-1, 2.0e-1])
+		@show sol
+		
+	    # Initial condition
+		u1 = [real(sol.zero[2]), real(sol.zero[1]), imag(sol.zero[1])]
+	    u2 = vcat([GL0(ε, pam, sol.zero[1], sol.zero[2])[:] for ε in εs]...)
+		u2 = reinterpret(Float64, u2)
+		u0 = [u1; u2]
+		@assert eltype(u0) <: Real
+		
+		d = ones(Int64, length(u0))
+		d[1] = 0
+		
+	    prob = ODEProblem(
+			ODEFunction(sp_neq, mass_matrix = Diagonal(d)),
+			u0, 
+			(0.0, tmax)
+		)
+		
+	    sol_t = solve(prob,
+			ImplicitEuler(; autodiff = false);
+			callback = FunctionCallingCallback((u, t, _) -> (@show t)),
+			kwargs...
+		)
 	end
 end;
 
-# ╔═╡ 777ae10b-bfac-4f08-bc85-c256b2165823
+# ╔═╡ 0bc43e51-0c4f-4af5-a526-00e2d99ccd29
+# let
+# 	str = "sp0"
+	
+# 	pams = []
+# 	sols = []
+	
+# 	for Nγ in [1e-1, 5e-1, 1e0, 2e0, 4e0, 6e0, 8e0][[3]]
+# 		for V0 in sqrt.([0.0925, 0.1084, 0.1243, 0.1561, 0.2038, 0.2674, 0.3628, 0.49])[[1:2]]
+# 			for ε0f in [-0.2, -0.25, -0.3, -0.35, -0.4, -0.45][[4]]
+# 				pam = EchoPulse.PhotonAssistedAIM(
+# 					V0 = V0, 
+# 					ε0f = ε0f,
+# 					Γ0 = sqrt(0.002),
+# 					ω0 = 0.0,
+# 					Ω0 = 0.1 * 5,
+# 					tγ = 100.0 / 5,
+# 					Nγ = Nγ
+# 				)
+# 				push!(sols, _solve(pam; 
+# 					tmax = 300 / 5,
+# 					dtmax = 0.5 / 5,
+# 					reltol = 5e-5,
+# 					abstol = 5e-5)
+# 				)
+# 				push!(pams, pam)
+# 			end
+# 		end
+# 	end
+
+# 	serialize("../data/$(str).jls", (
+# 		sols= [(t = s.t, u = s.u) for s in sols], 
+# 		pams = [Dict(key=>getfield(p, key) for key ∈ fieldnames(EchoPulse.PhotonAssistedAIM)) for p in pams])
+# 	)
+# end
+
+# ╔═╡ 60e7da8a-75d4-4644-9574-a61fda0b3d9e
 begin
-	# Gaussian shape
-	function ξ(t; Ω)
-	  return (Ω^2 / (2π))^(1/4) * exp(-t^2 * (Ω^2 / 4))
-	end
-
-	# Photon Green function
-	GLξ(t, t′; ω, Ω, tc) = -im * exp(-im * (t - t′) * ω) * ξ(t - t′,Ω=Ω)^2 * (Ω^2 / (2π))^(-1/2) * ξ(0.5 * (t + t′) - tc,Ω=Ω)^2
-	GGξ(t, t′; ω, Ω, tc) = -im * exp(-im * (t - t′) * ω) * ξ(t - t′,Ω=Ω)^2 * (Ω^2 / (2π))^(-1/2) * (1. + ξ(0.5 * (t + t′) - tc,Ω=Ω)^2)
+	str = "sp0"
 	
-    """
-    Slave boson mean-field equations in time
-    """
-    function sbmf(u, p, t)
-        @show t
-
-        b = interpolate(
-            (vcat(knots_, t), ), 
-            vcat(u1_coefs + im * u2_coefs, u[1] + im * u[2]), 
-            Gridded(Linear())
-        )
-
-        λ = interpolate(
-            (vcat(knots_, t), ), 
-            vcat(u3_coefs, u[3]), 
-            Gridded(Linear())
-        )
-
-        gγ = -im * GLξ(t,t; ω=pam.ω0, Ω=pam.Ω0, tc=pam.tc)^2
-
-        # Sum over all momenta    
-#         n = ∫dε(ε -> begin
-#             g = GL(t, ε, pam, b, λ)
-
-#             α = g[1,2] * b(t)' + g[2,1] * b(t)
-
-#             dαdb = g[1,2] + 0.5 * (pam.V0 * g[1,1]) * (g[2,2] - im) * b(t) + 0.5 * (pam.V0 * g[2,1]) * g[1,2]' * b(t)'
-#             dαdλ = 0.5 * g[2,1] * (g[2,2] - im) * b(t) + 0.5 * g[2,2] * g[1,2]' * b(t)'
-
-#             @SVector [g[1,2], g[2,2], ε * g[2,2], α, dαdb, dαdλ]
-#         end)
-        n = ∫dε(ε -> begin
-            g = GL(t, ε, pam, b, λ)
-
-            α = g[2,1] * b(t) + g[1,2] * b(t)' 
-
-            dαdb = g[1,2] + 0.5 * (pam.V0 * g[1,1]) * g[2,2] * b(t) + 0.5 * (pam.V0 * g[1,2]) * g[1,2] * b(t)'
-            dαdλ = 0.5 * g[2,1] * g[2,2] * b(t) + 0.5 * g[2,2] * g[1,2] * b(t)'
-
-            @SVector [g[1,2], g[2,2], ε * g[2,2], α, dαdb, dαdλ]
-        end)
-
-        db = -im * ((λ(t) - pam.ε0f) * b(t) - im * (pam.V0 * n[1] - 2pam.tf * b(t) * n[3]))
-        db+= -im * 2pam.Γ0^2 * gγ * n[4] * n[5]
-
-        dλ = abs2(b(t)) - im * n[2] - 1
-        dλ+= 2pam.Γ0^2 * gγ * n[4] * n[6]
-
-        return [real(db), imag(db), real(dλ)]
-    end
-
-    knots_ = [-1.0,]
-
-    u1_coefs = [real(sol.zero[1]), ]
-    u2_coefs = [imag(sol.zero[1]), ]
-    u3_coefs = [real(sol.zero[2]), ]
-
-    cb = FunctionCallingCallback((u,t,integrator)-> begin
-        push!(knots_, t)
-
-        push!(u1_coefs, u[1])
-        push!(u2_coefs, u[2])
-        push!(u3_coefs, u[3])
-    end)
-
-    # Initial condition
-    u0 = [real(sol.zero[1]), imag(sol.zero[1]), real(sol.zero[2])]
-
-	pam.Γ0=0.5; pam.ω0=0.1; pam.Ω0=1.0; pam.tc=5.0
-	
-    # Differential-Algebraic Delay Equation
-    f = ODEFunction(sbmf, mass_matrix=[1 0 0; 0 1 0; 0 0 0])
-    prob = ODEProblem(f, u0, (0.0, 10.0))
-    sol_t = solve(prob, QBDF(; autodiff=false), reltol=1e-4, abstol=1e-7)
+	(sols, pams) = deserialize("../data/$(str).jls")
+	tmax = sols[1].t[end]
 end;
 
-# ╔═╡ d543a368-c527-445c-999f-04ffcc048a83
-begin
-	plot(sol_t.t, (u -> sqrt(u[1]^2 + u[2]^2)).(sol_t.u), label=L"b", color=:darkblue)
-	plot!(sol_t.t, (u -> u[3]).(sol_t.u), label=L"\lambda", color=:darkgreen)
+# ╔═╡ 720e196f-78e9-4c92-ae62-3568951dc45e
+let
+	colours = let
+	  colourmap = cgrad(:viridis)
+	  [colourmap[i] for i in reverse(range(0.0, 0.6, length=length(sols)))]
+	end;
 	
-	# plot!(twinx(), sol_t.t, t -> ξ(t)^2, label="photon-field", color=:darkred, legend=false)
+	ylims = (0.77, 1.01)
+	xlims = (0, tmax)
+
+	p1 = plot( 
+		xlabel = L"T\ t", 
+		# ylabel = L"\lambda_0(t)",# / \lambda(t_0)", 
+		ylabel = L"\lambda_0(t) / \operatorname{max}\,\lambda_0(t)", 
+		ylims = ylims,
+		xlims = xlims,
+	)
+	
+	p1 = plot!(twinx(),
+		sols[1].t, 
+		t -> -imag(EchoPulse.:GγL0_ext(t, t; model=(; pams[1]...))),
+		xlims = xlims,
+		ylims = (0.0, pams[1][:Nγ]),
+		fill = (0, :grey, 0.5), 
+		line = nothing, 
+		legend = nothing, 
+		yticks = nothing,
+		xticks = nothing,
+	)
+
+	for i in reverse(collect(eachindex(sols)))
+		plot!([Inf], [Inf];
+			line = (1.0, colours[i]), 
+			label=L"V_0 = %$(round(pams[i][:V0], digits=2))",
+			# label=L"n_a = %$(round(pams[i][:Nγ], digits=2))",
+			legend = :bottomright
+			)
+	end
+	for (i, sol) in enumerate(sols)
+		
+		# Normalise data
+		# data = (u -> sqrt(u[2]^2 + u[3]^2)).(sol.u)
+		data = (u -> u[1]).(sol.u)
+		data ./= maximum(data[10:end])
+		
+		p1 = plot!(twinx(), 
+			sol.t, data, 
+			label = nothing,
+			line = (1.0, colours[i]), 
+			ylims = ylims,
+			xlims = xlims,
+			xticks = nothing,
+			yticks=([data[1], ], [round(sol.u[1][1], digits=2), ]), 
+			ymirror=true,
+			ylabel = isone(i) ? L"\lambda_0(t_0)" : ""
+		)
+
+		hline!([data[1],], line = (:dash, 1.0, colours[i], 0.4), label=nothing)
+	end
+
+	# p1 = plot!()
+	savefig("$(str).pdf")
 end
 
-# ╔═╡ e0a5ddb9-8c1a-46b7-a632-545c3f69e3fc
-# function GL_photon(tmax::Number, b, λ; Ω=2.0, tc=10)
-    
-#     h(t) = 0.5im * Ω^2 * (tc - t)
-    
-#     v(t) = ∫dε(ε -> begin
-#             g = GL(t, ε, pam, b, λ)
-#             @SVector [g[2,1]^2 * (b(t)')^2, b(t) * b(t) * g[1,2]^2, 2abs2(b(t)) * g[1,1] * g[2,2]]
-#         end)
-        
-#     solve(
-#         ODEProblem(
-#             (u,_,t) -> begin
-#                 @show t
-#                 flush(stdout)
-#                 v_ = v(t)
-#                 @show v_
-#                 o = -1.0im * (h(t) + sum(v_)) * u
-#                 o - o'
-#             end, 
-#             GLξ(0.0, 0.0),
-#             (0.0, tmax)
-#             ), Tsit5(), reltol=1e-6, abstol=1e-10, dtmax=1.0)
-# end
-
-# ╔═╡ 044abdb0-a0c9-4c01-8c69-919ea9602b2a
-# gl = GL_photon(10, t -> sol_time[end](t)[1] + im * sol_time[end](t)[2], t -> sol_time[end](t)[3]);
-
-# ╔═╡ b7147585-ee6d-4474-9ade-b9917401c76d
-# begin
-# 	function GL(ts::Vector, k::SVector, p::PAM, b, λ)
-# 	    t0 = first(ts)
-	    
-# 	    T = promote_type(typeof(t0), typeof(λ(t0)))
-	    
-# 	    u0 = GL0(k, p, b(t0), λ(t0))
-	    
-# 	    u0 = solve(
-# 	        ODEProblem(
-# 	            (u,_,t) -> -1.0im * H(k,p,b(t),λ(t);t=t) * u, 
-# 	            u0,
-# 	            (t0, last(ts))
-# 	        ), Tsit5(), reltol=1e-8, abstol=1e-10, saveat=ts)
-	    
-# 	    u0 = solve(
-# 	        ODEProblem(
-# 	            (u,_,t) -> [+1.0im * H(k,p,b(t),λ(t);t=t) * v for v in u], 
-# 	            u0.u,
-# 	            (t0, last(ts))
-# 	        ), Tsit5(), reltol=1e-8, abstol=1e-10, saveat=ts)
-	    
-# 	    return hcat(u0.u...)
-# 	end
-
-# 	function GG(ts::Vector, k::SVector, p::PAM, b, λ)
-# 	    t0 = first(ts)
-	    
-# 	    T = promote_type(typeof(t0), typeof(λ(t0)))
-	    
-# 	    u0 = GL0(k, p, b(t0), λ(t0)) - im * I
-	    
-# 	    u0 = solve(
-# 	        ODEProblem(
-# 	            (u,_,t) -> -1.0im * H(k,p,b(t),λ(t);t=t) * u, 
-# 	            u0,
-# 	            (t0, last(ts))
-# 	        ), Tsit5(), reltol=1e-8, abstol=1e-10, saveat=ts)
-	    
-# 	    u0 = solve(
-# 	        ODEProblem(
-# 	            (u,_,t) -> [+1.0im * H(k,p,b(t),λ(t);t=t) * v for v in u], 
-# 	            u0.u,
-# 	            (t0, last(ts))
-# 	        ), Tsit5(), reltol=1e-8, abstol=1e-10, saveat=ts)
-	    
-# 	    return hcat(u0.u...)
-# 	end
-
-# 	GbL = -im * [b_sol(t1)' * b_sol(t2) for t1 in ts, t2 in ts];
-# 	GbG = -im * [b_sol(t1) * b_sol(t2)' for t1 in ts, t2 in ts];
-# end
-
 # ╔═╡ Cell order:
+# ╟─a9e98579-eaa0-45f5-8353-065e05a3e093
 # ╠═f2b6c08c-29ed-11eb-2363-6143e3b233a5
+# ╠═22f5d22d-c092-4b44-a2da-af78f1978c8a
 # ╠═25366804-7db3-4672-8c80-2d762e6b6675
 # ╠═ba6ea9f1-2d8f-4853-b433-9825aef236a9
-# ╠═31fa9f1e-25c0-11eb-39ff-492bb3e7c011
 # ╠═31f97be0-2a6e-11eb-3f71-1f370f449c07
-# ╠═777ae10b-bfac-4f08-bc85-c256b2165823
-# ╠═d543a368-c527-445c-999f-04ffcc048a83
-# ╟─e0a5ddb9-8c1a-46b7-a632-545c3f69e3fc
-# ╟─044abdb0-a0c9-4c01-8c69-919ea9602b2a
-# ╟─b7147585-ee6d-4474-9ade-b9917401c76d
+# ╠═e7d8ca15-dd35-4505-b39a-17325d4e7762
+# ╠═0bc43e51-0c4f-4af5-a526-00e2d99ccd29
+# ╠═60e7da8a-75d4-4644-9574-a61fda0b3d9e
+# ╠═720e196f-78e9-4c92-ae62-3568951dc45e
