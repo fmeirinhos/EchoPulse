@@ -1,0 +1,225 @@
+(* Content-type: application/vnd.wolfram.mathematica *)
+
+(*** Wolfram Notebook File ***)
+(* http://www.wolfram.com/nb *)
+
+(* CreatedBy='Mathematica 13.0' *)
+
+(*CacheID: 234*)
+(* Internal cache information:
+NotebookFileLineBreakTest
+NotebookFileLineBreakTest
+NotebookDataPosition[       158,          7]
+NotebookDataLength[      7483,        217]
+NotebookOptionsPosition[      6057,        190]
+NotebookOutlinePosition[      6509,        208]
+CellTagsIndexPosition[      6466,        205]
+WindowFrame->Normal*)
+
+(* Beginning of Notebook Content *)
+Notebook[{
+Cell[BoxData[
+ RowBox[{"$Assumptions", "=", 
+  RowBox[{"{", 
+   RowBox[{
+    RowBox[{"\[Sigma]", ">", "0"}], ",", " ", 
+    RowBox[{"x0", " ", "\[Element]", "Reals"}], ",", " ", 
+    RowBox[{"n0", "\[Element]", "Reals"}]}], "}"}]}]], "Input",
+ CellLabel->"In[2]:=",ExpressionUUID->"fd4859bb-da91-476f-a164-487027b65d47"],
+
+Cell[BoxData[
+ RowBox[{
+  RowBox[{"\[Xi]", "[", 
+   RowBox[{"x_", ",", "x0_", ",", "\[Sigma]_"}], "]"}], "=", 
+  RowBox[{
+   RowBox[{"1", "/", 
+    RowBox[{"Sqrt", "[", 
+     RowBox[{"2", "Pi", " ", 
+      RowBox[{"\[Sigma]", "^", "2"}]}], "]"}]}], 
+   RowBox[{"Exp", "[", 
+    RowBox[{
+     RowBox[{"-", 
+      RowBox[{
+       RowBox[{"(", 
+        RowBox[{"x", "-", "x0"}], ")"}], "^", "2"}]}], "/", 
+     RowBox[{"(", 
+      RowBox[{"2", " ", 
+       RowBox[{"\[Sigma]", "^", "2"}]}], ")"}]}], "]"}]}]}]], "Input",
+ CellLabel->"In[3]:=",ExpressionUUID->"82d6b185-4843-4605-a730-c446b326811a"],
+
+Cell[BoxData[
+ RowBox[{"(*", 
+  RowBox[{"*", " ", "With", " ", "negative", " ", "frequencies"}], " ", 
+  "**)"}]], "Input",ExpressionUUID->"972b1b44-e452-4d73-9873-b1617441ac77"],
+
+Cell[BoxData[
+ RowBox[{"norm", " ", "=", " ", 
+  RowBox[{"Integrate", "[", 
+   RowBox[{
+    RowBox[{"\[Xi]", "[", 
+     RowBox[{"x", ",", "x0", ",", "\[Sigma]"}], "]"}], ",", 
+    RowBox[{"{", 
+     RowBox[{"x", ",", 
+      RowBox[{"-", "Infinity"}], ",", 
+      RowBox[{"+", "Infinity"}]}], "}"}]}], "]"}]}]], "Input",
+ CellLabel->"In[6]:=",ExpressionUUID->"eac128f6-3637-4e85-b52d-c1d44cf27403"],
+
+Cell[BoxData[
+ RowBox[{"gT", " ", "=", " ", 
+  RowBox[{
+   RowBox[{"Integrate", "[", 
+    RowBox[{
+     RowBox[{
+      RowBox[{
+       RowBox[{"\[Xi]", "[", 
+        RowBox[{"x", ",", "0.0", ",", "\[Sigma]"}], "]"}], " ", "/", "norm"}],
+       " ", 
+      RowBox[{"Exp", "[", 
+       RowBox[{
+        RowBox[{"-", "I"}], " ", "x", " ", "T"}], "]"}]}], " ", ",", 
+     RowBox[{"{", 
+      RowBox[{"x", ",", 
+       RowBox[{"-", "Infinity"}], ",", 
+       RowBox[{"+", "Infinity"}]}], "}"}], ",", 
+     RowBox[{"Assumptions", "\[Rule]", 
+      RowBox[{"T", "\[Element]", "Reals"}]}]}], "]"}], "//", 
+   "FullSimplify"}]}]], "Input",
+ CellLabel->"In[7]:=",ExpressionUUID->"94d5bf3e-9821-4283-a48f-98e014c1ed42"],
+
+Cell[BoxData[
+ RowBox[{"(*", 
+  RowBox[{
+  "*", " ", "Now", " ", "excluding", " ", "negative", " ", "frequencies"}], 
+  " ", "**)"}]], "Input",ExpressionUUID->"14a4bd27-ff32-4790-82d8-\
+80f21942e168"],
+
+Cell[BoxData[
+ RowBox[{"norm", " ", "=", " ", 
+  RowBox[{
+   RowBox[{"Integrate", "[", 
+    RowBox[{
+     RowBox[{"\[Xi]", "[", 
+      RowBox[{"x", ",", "x0", ",", "\[Sigma]"}], "]"}], ",", 
+     RowBox[{"{", 
+      RowBox[{"x", ",", "0", ",", 
+       RowBox[{"+", "Infinity"}]}], "}"}]}], "]"}], "//", 
+   "FullSimplify"}]}]], "Input",
+ CellLabel->"In[8]:=",ExpressionUUID->"16a7a1b9-a68f-44d4-ac91-4af65c7d8263"],
+
+Cell[BoxData[
+ RowBox[{"g\[Tau]", " ", "=", " ", 
+  RowBox[{
+   RowBox[{"Integrate", "[", 
+    RowBox[{
+     RowBox[{
+      RowBox[{
+       RowBox[{"\[Xi]", "[", 
+        RowBox[{"x", ",", "x0", ",", "\[Sigma]"}], "]"}], "/", "norm"}], " ", 
+      
+      RowBox[{"Exp", "[", 
+       RowBox[{
+        RowBox[{"-", "I"}], " ", "x", " ", "\[Tau]"}], "]"}]}], " ", ",", 
+     RowBox[{"{", 
+      RowBox[{"x", ",", "0", ",", 
+       RowBox[{"+", "Infinity"}]}], "}"}], ",", 
+     RowBox[{"Assumptions", "\[Rule]", 
+      RowBox[{"\[Tau]", "\[Element]", "Reals"}]}]}], "]"}], "//", 
+   "FullSimplify"}]}]], "Input",
+ CellLabel->"In[9]:=",ExpressionUUID->"6a50500e-6c17-4a72-9b34-f4800ff14bf5"],
+
+Cell[BoxData[
+ RowBox[{"(*", 
+  RowBox[{
+  "*", " ", "Now", " ", "using", " ", "a", " ", "differentiable", " ", 
+   "function"}], " ", "**)"}]], "Input",ExpressionUUID->"ae1fa232-97e3-49ed-\
+9641-1b1de52c2f20"],
+
+Cell[BoxData[
+ RowBox[{"norm", " ", "=", " ", 
+  RowBox[{
+   RowBox[{"Integrate", "[", 
+    RowBox[{
+     RowBox[{"x", " ", "*", " ", 
+      RowBox[{"\[Xi]", "[", 
+       RowBox[{"x", ",", "x0", ",", "\[Sigma]"}], "]"}]}], ",", 
+     RowBox[{"{", 
+      RowBox[{"x", ",", "0", ",", 
+       RowBox[{"+", "Infinity"}]}], "}"}]}], "]"}], "//", 
+   "FullSimplify"}]}]], "Input",
+ CellLabel->"In[10]:=",ExpressionUUID->"766dc152-f18d-4700-83ac-c0202e4a86cc"],
+
+Cell[BoxData[
+ RowBox[{"g\[Tau]2", " ", "=", " ", 
+  RowBox[{
+   RowBox[{"Integrate", "[", 
+    RowBox[{
+     RowBox[{"x", " ", "*", " ", 
+      RowBox[{
+       RowBox[{"\[Xi]", "[", 
+        RowBox[{"x", ",", "x0", ",", "\[Sigma]"}], "]"}], "/", "norm"}], " ", 
+      
+      RowBox[{"Exp", "[", 
+       RowBox[{
+        RowBox[{"-", "I"}], " ", "x", " ", "\[Tau]"}], "]"}]}], " ", ",", 
+     RowBox[{"{", 
+      RowBox[{"x", ",", "0", ",", 
+       RowBox[{"+", "Infinity"}]}], "}"}], ",", 
+     RowBox[{"Assumptions", "\[Rule]", 
+      RowBox[{"\[Tau]", "\[Element]", "Reals"}]}]}], "]"}], "//", 
+   "FullSimplify"}]}]], "Input",
+ CellLabel->"In[11]:=",ExpressionUUID->"e7eceeb4-fbf3-4e64-ae4c-cc85b52989b6"],
+
+Cell[BoxData[
+ RowBox[{"Plot", "[", 
+  RowBox[{
+   RowBox[{"Evaluate", "[", 
+    RowBox[{
+     RowBox[{
+      RowBox[{"{", 
+       RowBox[{"g\[Tau]", ",", "g\[Tau]2"}], "}"}], "/.", 
+      RowBox[{"{", 
+       RowBox[{
+        RowBox[{"x0", "->", "0.3"}], ",", " ", 
+        RowBox[{"\[Sigma]", "->", "0.3"}]}], "}"}]}], "//", "Re"}], "]"}], 
+   ",", 
+   RowBox[{"{", 
+    RowBox[{"\[Tau]", ",", 
+     RowBox[{"-", "30"}], ",", "30"}], "}"}], ",", 
+   RowBox[{"PlotRange", "\[Rule]", "Full"}]}], "]"}]], "Input",
+ CellLabel->"In[20]:=",ExpressionUUID->"604f82c2-c460-4990-b260-8cdb28db8a4b"]
+},
+WindowSize->{960, 1027},
+WindowMargins->{{7, Automatic}, {Automatic, 0}},
+Visible->True,
+TaggingRules-><|"TryRealOnly" -> False|>,
+FrontEndVersion->"13.0 for Mac OS X ARM (64-bit) (December 2, 2021)",
+StyleDefinitions->"Default.nb",
+ExpressionUUID->"ec33047c-1888-44a2-83b5-48c289859913"
+]
+(* End of Notebook Content *)
+
+(* Internal cache information *)
+(*CellTagsOutline
+CellTagsIndex->{}
+*)
+(*CellTagsIndex
+CellTagsIndex->{}
+*)
+(*NotebookFileOutline
+Notebook[{
+Cell[558, 20, 320, 7, 30, "Input",ExpressionUUID->"fd4859bb-da91-476f-a164-487027b65d47"],
+Cell[881, 29, 595, 18, 30, "Input",ExpressionUUID->"82d6b185-4843-4605-a730-c446b326811a"],
+Cell[1479, 49, 178, 3, 30, "Input",ExpressionUUID->"972b1b44-e452-4d73-9873-b1617441ac77"],
+Cell[1660, 54, 397, 10, 30, "Input",ExpressionUUID->"eac128f6-3637-4e85-b52d-c1d44cf27403"],
+Cell[2060, 66, 708, 20, 30, "Input",ExpressionUUID->"94d5bf3e-9821-4283-a48f-98e014c1ed42"],
+Cell[2771, 88, 200, 5, 30, "Input",ExpressionUUID->"14a4bd27-ff32-4790-82d8-80f21942e168"],
+Cell[2974, 95, 414, 11, 30, "Input",ExpressionUUID->"16a7a1b9-a68f-44d4-ac91-4af65c7d8263"],
+Cell[3391, 108, 687, 19, 30, "Input",ExpressionUUID->"6a50500e-6c17-4a72-9b34-f4800ff14bf5"],
+Cell[4081, 129, 210, 5, 30, "Input",ExpressionUUID->"ae1fa232-97e3-49ed-9641-1b1de52c2f20"],
+Cell[4294, 136, 453, 12, 30, "Input",ExpressionUUID->"766dc152-f18d-4700-83ac-c0202e4a86cc"],
+Cell[4750, 150, 709, 19, 30, "Input",ExpressionUUID->"e7eceeb4-fbf3-4e64-ae4c-cc85b52989b6"],
+Cell[5462, 171, 591, 17, 30, "Input",ExpressionUUID->"604f82c2-c460-4990-b260-8cdb28db8a4b"]
+}
+]
+*)
+
