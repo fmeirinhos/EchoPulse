@@ -42,61 +42,61 @@ begin
         tick_direction = :in,
         minorticks = true,
         framestyle = :box,
-        size = (600, 450),
+		size = (400,300),
         titlefontsize = 18,
-        legendfontsize = 12,
-        tickfontsize = 12,
+		guidefontsize = 11,
+		legendfontsize = 9,
+		tickfontsize = 9,
         grid = true,
-        #     dpi=100,
-		)
+    )
 
     my_colors = Dict(
-		:c => Plots.Colors.colorant"#0C5DA5", 
-		:dω => Plots.Colors.colorant"#FF9500",
-		:dτ => Plots.Colors.colorant"#00B945",
-		:ωK => Plots.Colors.colorant"#9e9e9e",
-		:εd => Plots.Colors.colorant"#845B97",
-		:ω0 => Plots.Colors.colorant"#FF2C00"
-		)
+        :c => Plots.Colors.colorant"#0C5DA5",
+        :dω => Plots.Colors.colorant"#FF9500",
+        :dτ => Plots.Colors.colorant"#00B945",
+        :ωK => Plots.Colors.colorant"#9e9e9e",
+        :εd => Plots.Colors.colorant"#845B97",
+        :ω0 => Plots.Colors.colorant"#FF2C00",
+    )
 end;
 
 # ╔═╡ 15bb008a-6b89-4cd6-aad5-5c30da31a7a5
 # parameters (units of Bethe-lattice hopping)
 begin
     # inverse temperature
-    β = 2e2
+    β = 1.5e2
 
     # model parameters
     model = EchoPulse.PhotonAssistedModel(
         # siam
         ;
-        V0 = sqrt(0.08), # Hybridization strength
+        V0 = sqrt(0.09), # Hybridization strength
         ε0f = -0.35, # F-electron ground state energy
         U0 = Inf, # f-electron Coulomb repulsion
 
 		# bath
-		α1 = sqrt(0.03), # Coupling to the thermal bath
-        α2 = sqrt(2.0), # Coupling to the photonic bath
+		α1 = sqrt(0.05), # Coupling to the fermionic bath
+        α2 = sqrt(10.), # Coupling to the photonic bath
 		cutoff = 0.25, # Photonic bath cutoff
 
 		# quantum light
-        Γ0 = sqrt(0.0008), # Photon hybridization strength
-        ω0 = 5.0e-3, # Photon central frequency
-        Ω0 = 8.0e-2, # Photon spectral width
-		Nγ = 5.0e0, # Photon pulse maximum average occupation
+        Γ0 = sqrt(0.002), # Photon hybridization strength
+        ω0 = 1e-3,#2.5e-2, # Photon central frequency
+        Ω0 = 6.0e-2,#9.0e-2, # Photon spectral width
+		Nγ = 1.0e1, # Photon pulse maximum average occupation
 		tγ = 2.5e2, # Photon pulse peak time
 
     	dmft = true # Bethe lattice dmft
     )
 
     # maximum integration time parameters
-    tmax = 1.0e3
+    tmax = 8.0e2
 end;
 
 # ╔═╡ 37eaf255-9d32-48e1-bb1a-f73394ae754c
 @time data_eq = EchoPulse.solve_eq(
 	model = model, 
-	ωs = range(-14.0, 14.0; length = 2^14 - 1), 
+	ωs = range(-13.0, 13.0; length = 2^16 - 1), 
 	β = β, 
 	KMS = true);
 
@@ -139,10 +139,11 @@ let
 	
     plot(data_eq.ωs, -2imag(data_eq.GcRω); 
 		label = L"-2\,\mathrm{Im}\,\sum_k G^R_{c_k}(\omega)", 
-		line = (my_colors[:c], ),
+		line = (my_colors[:c]),
 		xlabel = L"\omega/t", 
 		title = "Equilibrium spectral functions", 
 		xlims = (-3.0, 3.0), 
+		# xlims = (-0.3, 0.3),
 		ylims = (0.0, Inf)
 	)
 
@@ -187,30 +188,41 @@ let
 	i1 = findmin(x -> abs(x + tmax), ts)[2]
 	i2 = findmin(x -> abs(x - tmax), ts)[2]
 
-	ts = ts[i1:i2]
 	Gd = @views (L = lesser(Gd)[i1:i2, i1:i2], G = greater(Gd)[i1:i2, i1:i2])
 	Gc = @views (L = lesser(Gc)[i1:i2, i1:i2], G = greater(Gc)[i1:i2, i1:i2])
-	Gγ_ext = @views (L = lesser(Gγ_ext)[i1:i2, i1:i2], G = greater(Gγ_ext)[i1:i2, i1:i2])
 	Gγ0_ext = @views (L = lesser(Gγ0_ext)[i1:i2, i1:i2], G = greater(Gγ0_ext)[i1:i2, i1:i2])
 	Gγ_vac = @views (L = lesser(Gγ_vac)[i1:i2, i1:i2], G = greater(Gγ_vac)[i1:i2, i1:i2])
+	Gγ_ext = @views (L = lesser(Gγ_ext)[i1:i2, i1:i2], G = greater(Gγ_ext)[i1:i2, i1:i2])
+
+	ts = ts[i1:i2]
+	ts_lin = range(first(ts), last(ts), step=ts[2] - ts[1])
 	
 	# Wigner transforms
-	ρd_ω, (ωs, Ts) = EchoPulse.wigner_transform_itp(Gd.G - Gd.L, ts; fourier = true)
-	GdL_ω, _ = EchoPulse.wigner_transform_itp(Gd.L, ts; fourier = true)
+	ρd_ω, (ωs, Ts) = EchoPulse.wigner_transform_itp(
+		Gd.G - Gd.L, ts; fourier = true, ts_lin)
+	GdL_ω, _ = EchoPulse.wigner_transform_itp(Gd.L, ts; fourier = true, ts_lin)
 
-	ρc_ω, _ = EchoPulse.wigner_transform_itp(Gc.G - Gc.L, ts; fourier = true)
-	GcL_ω, _ = EchoPulse.wigner_transform_itp(Gc.L, ts; fourier = true)
+	ρc_ω, _ = EchoPulse.wigner_transform_itp(
+		Gc.G - Gc.L, ts; fourier = true, ts_lin)
+	GcL_ω, _ = EchoPulse.wigner_transform_itp(Gc.L, ts; fourier = true, ts_lin)
 
-	ργ0_ω, _ = EchoPulse.wigner_transform_itp(Gγ0_ext.G - Gγ0_ext.L, ts; fourier = true)
-	GγL0_ω, _ = EchoPulse.wigner_transform_itp(Gγ0_ext.L, ts; fourier = true)
+	ργ_ω, _ = EchoPulse.wigner_transform_itp(
+		Gγ_ext.G - Gγ_ext.L, ts; fourier = true, ts_lin)
+	GγL_ω, _ = EchoPulse.wigner_transform_itp(Gγ_ext.L, ts; fourier = true, ts_lin)
 
-	ργ_ω, _ = EchoPulse.wigner_transform_itp(Gγ_ext.G - Gγ_ext.L, ts; fourier = true)
-	GγL_ω, _ = EchoPulse.wigner_transform_itp(Gγ_ext.L, ts; fourier = true)
+	GγL_vac, _ = EchoPulse.wigner_transform_itp(Gγ_vac.L, ts; fourier = true, ts_lin)
 
-	GγL_vac, _ = EchoPulse.wigner_transform_itp(Gγ_vac.L, ts; fourier = true)
-
+	# DMFT baby
+	GcR_ω, _ = EchoPulse.wigner_transform_itp(
+		LowerTriangular(data.GcG[i1:i2, i1:i2] - data.GcL[i1:i2, i1:i2]), ts; fourier = true, ts_lin)
+	𝒢cR_ω, _ = @views EchoPulse.wigner_transform_itp(
+		LowerTriangular(data.𝒢cG[i1:i2, i1:i2] - data.𝒢cL[i1:i2, i1:i2]), ts; fourier = true, ts_lin)
+	TcR_ω, _ = @views EchoPulse.wigner_transform_itp(
+		LowerTriangular(data.TcG[i1:i2, i1:i2] - data.TcL[i1:i2, i1:i2]), ts; fourier = true, ts_lin)
+	ΣcR_ω = mapreduce(x -> x[1] .* x[2] ./ x[3], hcat, zip(eachcol(TcR_ω), eachcol(𝒢cR_ω), eachcol(GcR_ω)));
+	
 	serialize(
-		"../data/test0.jls",
+		"../data/special-run-99.jls",
 		(;
 			params = (;
 				V0 = model.V0,
@@ -237,17 +249,130 @@ let
 				GdL_ω,
 				ρc_ω,
 				GcL_ω,
-				ργ0_ω,
-				GγL0_ω,
 				ργ_ω,
 				GγL_ω,
-				GγL_vac
+				GγL_vac,
+				ΣcR_ω
 				),
 		),
 	)
 end
 
-# ╔═╡ ebbdba0e-450c-4427-b626-6bf66afe2b37
+# ╔═╡ 44cd66c0-aada-47af-91bd-c2368b69ee4b
+# let
+# 	function solve(str; β)
+# 		@time data_eq = EchoPulse.solve_eq(
+# 			model = model, 
+# 			ωs = range(-13.0, 13.0; length = 2^16 - 1), 
+# 			β = β, 
+# 			KMS = true);
+			
+# 		@time (; data, t0) = EchoPulse.PhotonAssistedModelData(
+# 			data_eq = data_eq, 
+# 			model = model, 
+# 			timematrix = true, 
+# 			nτK = 17,
+# 			rtol = 2e-4);
+
+# 		@time (; Gd, Gc, Gγ0_ext, Gγ_ext, Gγ_vac, ts, ws) = EchoPulse.solve(
+# 			data = data,
+# 			model = model,
+# 			t0 = t0,
+# 			tmax = tmax,
+# 			rtol = 1e-5,
+# 			kmax_vie = 5,
+# 		);
+
+# 		# Trim data
+# 		i1 = findmin(x -> abs(x + tmax), ts)[2]
+# 		i2 = findmin(x -> abs(x - tmax), ts)[2]
+# 		r = i1:i2
+	
+# 		Gd = @views (L = lesser(Gd)[r, r], G = greater(Gd)[r, r])
+# 		Gc = @views (L = lesser(Gc)[r, r], G = greater(Gc)[r, r])
+# 		Gγ0_ext = @views (L = lesser(Gγ0_ext)[r, r], G = greater(Gγ0_ext)[r, r])
+# 		Gγ_vac = @views (L = lesser(Gγ_vac)[r, r], G = greater(Gγ_vac)[r, r])
+# 		Gγ_ext = @views (L = lesser(Gγ_ext)[r, r], G = greater(Gγ_ext)[r, r])
+	
+# 		ts = ts[r]
+# 		ts_lin = range(first(ts), last(ts), step=(ts[2] - ts[1]))
+	
+# 		# Wigner transforms
+# 		ρd_ω, (ωs, Ts) = EchoPulse.wigner_transform_itp(
+# 			Gd.G - Gd.L, ts; fourier = true, ts_lin)
+# 		GdL_ω, _ = EchoPulse.wigner_transform_itp(Gd.L, ts; fourier = true, ts_lin)
+	
+# 		ρc_ω, _ = EchoPulse.wigner_transform_itp(
+# 			Gc.G - Gc.L, ts; fourier = true, ts_lin)
+# 		GcL_ω, _ = EchoPulse.wigner_transform_itp(Gc.L, ts; fourier = true, ts_lin)
+	
+# 		ργ_ω, _ = EchoPulse.wigner_transform_itp(
+# 			Gγ_ext.G - Gγ_ext.L, ts; fourier = true, ts_lin)
+# 		GγL_ω, _ = EchoPulse.wigner_transform_itp(Gγ_ext.L, ts; fourier = true, ts_lin)
+	
+# 		GγL_vac, _ = EchoPulse.wigner_transform_itp(Gγ_vac.L, ts; fourier = true, ts_lin)
+	
+# 		# DMFT baby
+# 		GcR_ω, _ = EchoPulse.wigner_transform_itp(
+# 			LowerTriangular(data.GcG[r, r] - data.GcL[r, r]), ts; fourier = true, ts_lin)
+# 		𝒢cR_ω, _ = @views EchoPulse.wigner_transform_itp(
+# 			LowerTriangular(data.𝒢cG[r, r] - data.𝒢cL[r, r]), ts; fourier = true, ts_lin)
+# 		TcR_ω, _ = @views EchoPulse.wigner_transform_itp(
+# 			LowerTriangular(data.TcG[r, r] - data.TcL[r, r]), ts; fourier = true, ts_lin)
+# 		ΣcR_ω = mapreduce(x -> x[1] .* x[2] ./ x[3], hcat, zip(eachcol(TcR_ω), eachcol(𝒢cR_ω), eachcol(GcR_ω)));
+	
+# 		serialize(
+# 			str,
+# 			(;
+# 				params = (;
+# 					V0 = model.V0,
+# 					ε0f = model.ε0f,
+# 					U0 = model.U0,
+# 					Γ0 = model.Γ0,
+# 					ω0 = model.ω0,
+# 					Ω0 = model.Ω0,
+# 					α1 = model.α1,
+# 	                α2 = model.α2,
+# 					Nγ = model.Nγ,
+# 					tγ = model.tγ,
+# 					cutoff = model.cutoff,
+# 					τK = data_eq.τK,
+# 					ωK = data_eq.ωK,
+# 					β = β,
+# 				),
+	
+# 				Ts = Ts,
+# 				ωs = ωs,
+	
+# 				data = (;
+# 					ρd_ω,
+# 					GdL_ω,
+# 					ρc_ω,
+# 					GcL_ω,
+# 					ργ_ω,
+# 					GγL_ω,
+# 					GγL_vac,
+# 					ΣcR_ω
+# 					),
+# 			),
+# 		)
+# 	end
+
+# 	i = 0
+
+# 	for β in [1e0, 3e0, 7e0, 1e1, 1.5e1, 3e1, 5e1, 8.5e1, 1e2, 1.5e2]
+# 		@show i
+# 		if β == 3e1
+# 			try
+# 				solve("../data/new-run-$(i).jls"; β = β)
+# 			catch
+# 			end
+# 		end
+# 		i += 1
+# 	end
+# end
+
+# ╔═╡ 8f2def10-33cf-4bde-8b3e-6ea075776a14
 GC.gc()
 
 # ╔═╡ 500d67f8-4893-4d5b-82b9-ea009eda2b18
@@ -256,13 +381,14 @@ varinfo(@__MODULE__, imported=true)
 # ╔═╡ Cell order:
 # ╟─1cf881a4-ea46-11ec-3c1c-73c3deb8f624
 # ╠═efd2fee3-ba72-42f5-9e7f-fe32eee11a0d
-# ╟─fb07d4eb-95c0-497a-8fe5-8515026b5b89
+# ╠═fb07d4eb-95c0-497a-8fe5-8515026b5b89
 # ╠═15bb008a-6b89-4cd6-aad5-5c30da31a7a5
 # ╠═37eaf255-9d32-48e1-bb1a-f73394ae754c
 # ╟─21895ece-5cf4-4f6f-b851-44d4fefb1788
 # ╟─1ecc4622-b311-47bd-8ba0-d6effa01fa35
 # ╠═db46311b-40b3-418f-90ca-ab30fd1d031b
 # ╠═6c62195c-da9e-43dc-b091-3513fb117274
-# ╟─d290ffe2-531c-4f12-bd08-1a282716d8ad
-# ╠═ebbdba0e-450c-4427-b626-6bf66afe2b37
+# ╠═d290ffe2-531c-4f12-bd08-1a282716d8ad
+# ╠═44cd66c0-aada-47af-91bd-c2368b69ee4b
+# ╠═8f2def10-33cf-4bde-8b3e-6ea075776a14
 # ╠═500d67f8-4893-4d5b-82b9-ea009eda2b18

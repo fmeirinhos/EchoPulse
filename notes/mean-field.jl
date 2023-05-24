@@ -4,38 +4,6 @@
 using Markdown
 using InteractiveUtils
 
-# ╔═╡ 22f5d22d-c092-4b44-a2da-af78f1978c8a
-begin
-	using Plots, LaTeXStrings
-
-	Plots.gr()
-
-	# Plots.default()
-	Plots.default(
-		fontfamily = "Computer Modern",
-		background_color_legend = nothing,
-		foreground_color_legend = nothing,
-		tick_direction = :in,
-		minorticks = true,
-		framestyle = :box,
-		size = (600, 450),
-		titlefontsize = 16,
-		guidefontsize = 11,
-		legendfontsize = 9,
-		tickfontsize = 9,
-		grid = true,
-		)
-
-	my_colors = Dict(
-		:c => Plots.Colors.colorant"#0C5DA5", 
-		:dω => Plots.Colors.colorant"#FF9500",
-		:dτ => Plots.Colors.colorant"#00B945",
-		:ωK => Plots.Colors.colorant"#9e9e9e",
-		:εd => Plots.Colors.colorant"#845B97",
-		:ω0 => Plots.Colors.colorant"#FF2C00"
-		)
-end;
-
 # ╔═╡ a9e98579-eaa0-45f5-8353-065e05a3e093
 function ingredients(path::String)
     # this is from the Julia source code (evalfile in base/loading.jl)
@@ -78,6 +46,40 @@ begin
 	using DifferentialEquations
 	using Serialization
 end
+
+# ╔═╡ 22f5d22d-c092-4b44-a2da-af78f1978c8a
+begin
+	using Plots, LaTeXStrings
+	
+    Plots.gr(); Plots.default()
+	
+    Plots.default(
+        fontfamily = "Computer Modern",
+        background_color_legend = nothing,
+        foreground_color_legend = nothing,
+        tick_direction = :in,
+        minorticks = true,
+        framestyle = :box,
+        size = 2.0 * 288.00 .* ((1 + sqrt(5))/2, 1),
+        titlefontsize = 18,
+		guidefontsize = 11,
+		legendfontsize = 9,
+		tickfontsize = 9,
+        grid = true,
+		margin = 5Plots.mm
+    )
+
+	Plots.scalefontsizes(2.0)
+
+    my_colors = Dict(
+        :c => Plots.Colors.colorant"#0C5DA5",
+        :dω => Plots.Colors.colorant"#FF9500",
+        :dτ => Plots.Colors.colorant"#00B945",
+        :ωK => Plots.Colors.colorant"#9e9e9e",
+        :εd => Plots.Colors.colorant"#845B97",
+        :ω0 => Plots.Colors.colorant"#FF2C00",
+    )
+end;
 
 # ╔═╡ 25366804-7db3-4672-8c80-2d762e6b6675
 begin
@@ -293,22 +295,27 @@ begin
 	str = "sp0"
 	
 	(sols, pams) = deserialize("../data/$(str).jls")
+	sols = sols[[1,3,4,5,6,7,8]]
+	pams = pams[[1,3,4,5,6,7,8]]
 	tmax = sols[1].t[end]
 end;
 
 # ╔═╡ 720e196f-78e9-4c92-ae62-3568951dc45e
 let
+	@assert str in ["sp0", "sp1"]
+	
 	colours = let
 	  colourmap = cgrad(:viridis)
 	  [colourmap[i] for i in reverse(range(0.0, 0.6, length=length(sols)))]
 	end;
 	
 	ylims = (0.77, 1.01)
+	# ylims = (0.0, 0.12)
 	xlims = (0, tmax)
 
 	p1 = plot( 
-		xlabel = L"T\ t", 
-		# ylabel = L"\lambda_0(t)",# / \lambda(t_0)", 
+		xlabel = L"t\ \upsilon", 
+		# ylabel = L"\lambda_0(t)", 
 		ylabel = L"\lambda_0(t) / \operatorname{max}\,\lambda_0(t)", 
 		ylims = ylims,
 		xlims = xlims,
@@ -328,7 +335,7 @@ let
 
 	for i in reverse(collect(eachindex(sols)))
 		plot!([Inf], [Inf];
-			line = (1.0, colours[i]), 
+			line = (2.0, colours[i]), 
 			label=L"V_0 = %$(round(pams[i][:V0], digits=2))",
 			# label=L"n_a = %$(round(pams[i][:Nγ], digits=2))",
 			legend = :bottomright
@@ -337,27 +344,85 @@ let
 	for (i, sol) in enumerate(sols)
 		
 		# Normalise data
-		# data = (u -> sqrt(u[2]^2 + u[3]^2)).(sol.u)
 		data = (u -> u[1]).(sol.u)
 		data ./= maximum(data[10:end])
 		
 		p1 = plot!(twinx(), 
 			sol.t, data, 
 			label = nothing,
-			line = (1.0, colours[i]), 
+			line = (2.0, colours[i]), 
 			ylims = ylims,
 			xlims = xlims,
 			xticks = nothing,
+			# yticks = nothing,
 			yticks=([data[1], ], [round(sol.u[1][1], digits=2), ]), 
 			ymirror=true,
 			ylabel = isone(i) ? L"\lambda_0(t_0)" : ""
 		)
 
-		hline!([data[1],], line = (:dash, 1.0, colours[i], 0.4), label=nothing)
+		hline!([data[1],], line = (:dash, 2.0, colours[i], 0.3), label=nothing)
 	end
+	plot!(framestyle = :box,)
+	savefig("$(str).svg")
+end
 
-	# p1 = plot!()
-	savefig("$(str).pdf")
+# ╔═╡ ba70f3ba-03ee-4143-b598-3b4e930ca619
+let
+	@assert str in ["sp2", "sp3"]
+	
+	colours = let
+	  colourmap = cgrad(:viridis)
+	  [colourmap[i] for i in reverse(range(0.0, 0.6, length=length(sols)))]
+	end;
+	
+	ylims = (0.0, 0.105)
+	xlims = (0, tmax)
+
+	p1 = plot( 
+		xlabel = L"t\ \upsilon", 
+		ylabel = L"\lambda_0(t)", 
+		ylims = ylims,
+		xlims = xlims,
+	)
+	
+	p1 = plot!(twinx(),
+		sols[1].t, 
+		t -> -imag(EchoPulse.:GγL0_ext(t, t; model=(; pams[1]...))),
+		xlims = xlims,
+		ylims = (0.0, pams[1][:Nγ]),
+		fill = (0, :grey, 0.5), 
+		line = nothing, 
+		legend = nothing, 
+		yticks = nothing,
+		xticks = nothing,
+	)
+
+	for i in reverse(collect(eachindex(sols)))
+		plot!([Inf], [Inf];
+			line = (2.0, colours[i]), 
+			label=L"n_a = %$(round(pams[i][:Nγ], digits=2))",
+			legend = :topright
+			)
+	end
+	for (i, sol) in enumerate(sols)
+		
+		# Normalise data
+		data = (u -> u[1]).(sol.u)
+		
+		p1 = plot!(twinx(), 
+			sol.t, data, 
+			label = nothing,
+			line = (2.0, colours[i]), 
+			ylims = ylims,
+			xlims = xlims,
+			xticks = nothing,
+			yticks = nothing,
+		)
+
+		hline!([data[1],], line = (:dash, 2.0, colours[i], 0.3), label=nothing)
+	end
+	plot!(framestyle = :box,)
+	savefig("$(str).svg")
 end
 
 # ╔═╡ Cell order:
@@ -371,3 +436,4 @@ end
 # ╠═0bc43e51-0c4f-4af5-a526-00e2d99ccd29
 # ╠═60e7da8a-75d4-4644-9574-a61fda0b3d9e
 # ╠═720e196f-78e9-4c92-ae62-3568951dc45e
+# ╠═ba70f3ba-03ee-4143-b598-3b4e930ca619

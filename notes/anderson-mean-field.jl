@@ -52,20 +52,71 @@ end;
 # ╔═╡ d7274904-d847-4d90-bc63-2e4adc6d3076
 magnetization = map(x -> abs(x[1] - x[2]), sols) .|> x -> clamp(x, 1e-6, 1.0)
 
+# ╔═╡ f043e915-5b49-45dd-a706-414ecf43f2f7
+begin
+  PyPlot.rc("text", usetex=true)
+  PyPlot.rc("text.latex", preamble=["\\usepackage{lmodern}", "\\usepackage{amsmath}", "\\usepackage{amssymb}"])
+  PyPlot.rc("pgf", rcfonts=false)
+
+  # Set y axis
+  PyPlot.rc("ytick", direction = "inout")
+  PyPlot.rc("ytick.major", size = 3)
+  PyPlot.rc("ytick.major", width = 0.5)
+  PyPlot.rc("ytick.minor", size = 1.5)
+  PyPlot.rc("ytick.minor", width = 0.5)
+  PyPlot.rc("ytick.minor", visible = true)
+  PyPlot.rc("ytick", right = true)
+
+  # Set x axis
+  PyPlot.rc("xtick", direction = "inout")
+  PyPlot.rc("xtick.major", size = 3)
+  PyPlot.rc("xtick.major", width = 0.5)
+  PyPlot.rc("xtick.minor", size = 1.5)
+  PyPlot.rc("xtick.minor", width = 0.5)
+  PyPlot.rc("xtick.minor", visible = true)
+  PyPlot.rc("xtick", top = true)
+
+  # Always save as 'tight'
+  PyPlot.rc("savefig", bbox = "tight")
+  PyPlot.rc("savefig", pad_inches = 0.05)
+
+  # Set line widths
+  PyPlot.rc("axes", linewidth = 0.5)
+  PyPlot.rc("grid", linewidth = 0.5)
+  PyPlot.rc("lines", linewidth = 1.0)
+    
+  # Remove legend frame
+  PyPlot.rc("legend", frameon = false)
+
+  PyPlot.rc("axes.spines", left = true)
+  PyPlot.rc("axes.spines", bottom = true)
+  PyPlot.rc("axes.spines", top = true)
+  PyPlot.rc("axes.spines", right = true)
+
+  # For my thesis
+  PyPlot.rc("figure", figsize = [4, 3])
+  PyPlot.rc("axes", labelsize = 11)
+  PyPlot.rc("font", size = 11)
+  PyPlot.rc("legend", fontsize = 9)
+  PyPlot.rc("xtick", labelsize = 9)
+  PyPlot.rc("ytick", labelsize = 9)
+end
+
 # ╔═╡ 885e06da-b82c-4544-b1e0-ade36a1cf91a
 begin
 	PyPlot.clf()
-	base = PyPlot.contourf(εs, Us, magnetization', levels=4, cmap = "gray_r", alpha=0.8)
+	base = PyPlot.contourf(εs, Us, magnetization', levels=5, 
+		cmap = "Spectral_r", alpha=0.8)
 	line = PyPlot.contour(εs, Us, magnetization', levels = base.levels, colors="black", linewidths=1.0)
-	PyPlot.title("Local moment formation")
-	PyPlot.xlabel(L"\varepsilon_d / \Delta")
+	# PyPlot.title("Local moment formation")
+	PyPlot.xlabel(L"\varepsilon^f_0 / \Delta")
 	PyPlot.ylabel(L"U / \Delta")
 	PyPlot.clabel(line, inline=1, fontsize=8)
 	bar = PyPlot.colorbar(base)
 	bar.add_lines(line)
 	bar.ax.set_ylabel("magnetization")
-	# PyPlot.savefig("mf.pdf")
-	PyPlot.show()
+	PyPlot.savefig("mf.pdf")
+	# PyPlot.show()
 end
 
 # ╔═╡ Cell order:
@@ -74,4 +125,5 @@ end
 # ╠═f9c403a5-0421-4781-a1d3-ae62655e3733
 # ╠═0a14b2ba-c2ae-41cd-8498-7ca1f36cbcba
 # ╠═d7274904-d847-4d90-bc63-2e4adc6d3076
+# ╠═f043e915-5b49-45dd-a706-414ecf43f2f7
 # ╠═885e06da-b82c-4544-b1e0-ade36a1cf91a
