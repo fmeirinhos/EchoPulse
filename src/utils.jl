@@ -10,15 +10,6 @@ bethe_dos(ε) = abs(ε) <= 2 ? 1 / pi * sqrt(1 - (ε / 2)^2) : 0.0
 # Free photon gas density of states
 photon_dos(ε; cutoff) = (ε < 0 ? 0.0 : ε < cutoff ? ε : ε * exp(-(ε - cutoff) / cutoff))
 
-# Calculates the Kondo temperature
-kondo_temperature(V0, ε0, ρ0, D0, N) = (W0 = V0^2 * ρ0; D0 * (N * W0 / D0)^(1 / N) * exp(ε0 / (N * W0)))
-
-function kondo_temperature_from_fit(ωs, GdRω, ε0f)
-    m(ω, p) = @. p[1] * p[2] / ((ω - p[3])^2 + p[2]^2) + p[4] * p[5] / ((ω - p[6])^2 + p[5]^2)
-    fit = curve_fit(m, ωs, -imag(GdRω), [1.0, 0.2, ε0f, 1.0, 0.03, 0.0])
-    fit.converged ? (abs(fit.param[3]) < abs(fit.param[6]) ? abs(fit.param[2]) : abs(fit.param[5])) : @error "Kondo temperature not found"
-end
-
 """
     G∞(g)
 
@@ -56,4 +47,35 @@ Interpolates `x` on an equidistant mesh with the same boundaries and length as `
 function wigner_transform_itp(x::AbstractMatrix, ts::Vector; fourier = true, ts_lin = range(first(ts), last(ts); length = length(ts)))
     itp = interpolate((ts, ts), x, Gridded(Linear()))
     return wigner_transform([itp(t1, t2) for t1 in ts_lin, t2 in ts_lin]; ts = ts_lin, fourier = fourier)
+end
+
+# Calculates the Kondo temperature
+kondo_temperature(V0, ε0, ρ0, D0, N) = (W0 = V0^2 * ρ0; D0 * (N * W0 / D0)^(1 / N) * exp(ε0 / (N * W0)))
+
+kondo_temperature2(V0, ε0, ρ0, D0, N, U0=Inf) = (J = abs(-2 * V0^2 / ε0 * (isinf(U0) ? 1.0 : U0 / (U0 + ε0))); D0 * (N * J * ρ0)^(1 / N) * exp(-1 / (N * J * ρ0)))
+
+function kondo_temperature_from_fit(ωs, GdRω, ε0f, U0)
+    if isinf(U0)
+        fit = curve_fit((ω, p) -> (@. p[1] * p[2] / ((ω - p[3])^2 + p[2]^2) + p[4] * p[5] / ((ω - p[6])^2 + p[5]^2)), ωs, -imag(GdRω), [1.0, 0.2, ε0f, 1.0, 0.03, 0.0])
+        fit.converged ? (abs(fit.param[3]) < abs(fit.param[6]) ? abs(fit.param[2]) : abs(fit.param[5])) : 0.015
+    else
+        fit = curve_fit((ω, p) -> (@. p[1] * p[2] / ((ω - p[3])^2 + p[2]^2) + p[4] * p[5] / ((ω - p[6])^2 + p[5]^2) + p[7] * p[8] / ((ω - p[9])^2 + p[8]^2)), ωs, -imag(GdRω), [1.0, 0.2, ε0f, 1.0, 0.03, 0.0, 1.0, 0.2, ε0f + U0])
+        if fit.converged
+            if abs(fit.param[3]) < abs(fit.param[6])
+                if abs(fit.param[3]) < abs(fit.param[9])
+                    return abs(fit.param[2])
+                else
+                    return abs(fit.param[8])
+                end
+            else
+                if abs(fit.param[6]) < abs(fit.param[9])
+                    return abs(fit.param[5])
+                else
+                    return abs(fit.param[8])
+                end
+            end
+        else
+            @error "Kondo temperature not found"
+        end
+    end
 end

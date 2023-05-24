@@ -38,9 +38,6 @@ begin
     using Pkg
     Pkg.activate()
 
-    using LinearAlgebra: diag
-    using KadanoffBaym, LangrethsRules
-
     const EchoPulse = ingredients("../src/EchoPulse.jl")
 
     using Plots, LaTeXStrings

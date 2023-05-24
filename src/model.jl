@@ -1,7 +1,7 @@
 """
-Photon-assisted Anderson impurity model
+Photon-assisted Anderson (impurity) model
 """
-Base.@kwdef mutable struct PhotonAssistedAIM{T<:AbstractFloat}
+Base.@kwdef mutable struct PhotonAssistedModel{T<:AbstractFloat}
     V0::T           # Hybridization strength
     ε0f::T          # f-electron ground state energy
     U0::T     = Inf # f-electron Coulomb repulsion
@@ -16,16 +16,31 @@ Base.@kwdef mutable struct PhotonAssistedAIM{T<:AbstractFloat}
 
     Nγ::T           # Photon pulse maximum average occupation
     tγ::T           # Photon pulse peak time
+
+    N::T      = 2.0 # Spin degeneracy
+
+    dmft::Bool      # Whether to solve single-impurity or DMFT
 end
 
-# Non-interacting external photon Green functions
+"""
+Non-interacting external photon Green functions
+
+To good approximation, these are a circle in the (t, t') plane.
+It is only approximate because in order to avoid negative and finite-density zero
+photon frequencies, the function in the difference of time `(t - t')` direction 
+is obtained by the modified half-Fourier transform ∫₀∞ dω ω e^{-i ω (t - t')} of
+the Gaussian in centre-of-mass-time (t + t′) / 2.
+
+There is still some clarification to go regarding whether a physical pulse can
+be further distorted in the (t - t′) direction.
+"""
 GγL0_ext(t, t′; model) = (x = (model.ω0 - im * model.Ω0^2 * (t - t′) / 2) / model.Ω0; -im * (0 + model.Nγ * exp(-((t + t′) / 2 - model.tγ)^2 * model.Ω0^2)) * (1 + sqrt(pi) * x * (2exp(x^2) - erfcx(x))) / (1 + exp((model.ω0 / model.Ω0)^2) * sqrt(π) * model.ω0 / model.Ω0 * (1 + erf(model.ω0 / model.Ω0))))
 GγG0_ext(t, t′; model) = (x = (model.ω0 - im * model.Ω0^2 * (t - t′) / 2) / model.Ω0; -im * (1 + model.Nγ * exp(-((t + t′) / 2 - model.tγ)^2 * model.Ω0^2)) * (1 + sqrt(pi) * x * (2exp(x^2) - erfcx(x))) / (1 + exp((model.ω0 / model.Ω0)^2) * sqrt(π) * model.ω0 / model.Ω0 * (1 + erf(model.ω0 / model.Ω0))))
 
 """
 Data for solving the photon-assisted Anderson impurity model in non-equilibrium
 """
-struct PhotonAssistedAIMData{T<:Complex{<:AbstractFloat}}
+struct PhotonAssistedModelData{T<:Complex{<:AbstractFloat}}
     𝒢cL::GreenFunction{T,2,Array{T,2},SkewHermitian} # Weiss field
     𝒢cG::GreenFunction{T,2,Array{T,2},SkewHermitian} # Weiss field
     GcL::GreenFunction{T,2,Array{T,2},SkewHermitian} # Local field
@@ -65,13 +80,24 @@ struct PhotonAssistedAIMData{T<:Complex{<:AbstractFloat}}
     GdG::GreenFunction{T,2,Array{T,2},SkewHermitian}
 end
 
-function PhotonAssistedAIMData(; data_eq, model::PhotonAssistedAIM, timematrix, dmft, nτK, rtol)
+"""
+Creates the PhotonAssistedModelData
+
+# Parameters
+    - `data_eq`: The named-tuple return of `solve_eq`
+    - `model::PhotonAssistedModel`: A struct with model parameters
+    - `timematrix::Bool`: Whether to use timematrix initial conditions
+    - `nτK::Int`: The number of Kondo timescales to include in the timematrix
+    - `nmax::Int`: The maximum number of points in the initial timematrix
+    - `rtol::Number`: The relative tolerance for the sanity tests
+"""
+function PhotonAssistedModelData(; data_eq, model::PhotonAssistedModel, timematrix, nτK, nmax = 6000, rtol, atol = 1e-3 * rtol)
     (; 𝒢cLτ, 𝒢cGτ, GcGτ, GcLτ, GLτ, GGτ, GcLτ_bath, GcGτ_bath, GγLτ_bath, GγGτ_bath, Στ, τs, τK) = data_eq
 
-    # Trim the initial timematrix to contain `nτK` Kondo time-scales `τK` or find τ = 0 index (corresponds to ∫dω)
+    # Trim the initial timematrix to contain `nτK` Kondo timescales `τK` or find τ = 0 index (corresponds to ∫dω)
     r = let
         # This is clamped to avoid running out of memory (5000-sized complex matrix of Float64s corresponds to ~500MB)
-        T = timematrix ? clamp(nτK * τK, nτK * τK, 5500 * (τs[2] - τs[1])) : 0
+        T = timematrix ? clamp(nτK * τK, nτK * τK, nmax * (τs[2] - τs[1])) : 0
 
         if T < nτK * τK
             @warn "Under-estimated initial matrix by $(1 - T / (nτK * τK))"
@@ -81,7 +107,7 @@ function PhotonAssistedAIMData(; data_eq, model::PhotonAssistedAIM, timematrix, 
 
     GcL = GreenFunction(G∞(GcLτ[r]), SkewHermitian)
     GcG = GreenFunction(G∞(GcGτ[r]), SkewHermitian)
-    if dmft
+    if model.dmft
         if timematrix
             𝒢cL = GreenFunction(G∞(𝒢cLτ[r]), SkewHermitian)
             𝒢cG = GreenFunction(G∞(𝒢cGτ[r]), SkewHermitian)
@@ -130,11 +156,11 @@ function PhotonAssistedAIMData(; data_eq, model::PhotonAssistedAIM, timematrix, 
     t0 = range(stop = 0.0, length = size(GaL, 1), step = τs[2] - τs[1]) |> collect
     @assert length(t0) == size(GbL, 1)
 
-    data = PhotonAssistedAIMData(𝒢cL, 𝒢cG, GcL, GcG, GcL_bath, GcG_bath, GfL, GfG, GbL, GbG, GaL, GaG, (t, t′) -> GγL0_ext(t, t′; model = model), (t, t′) -> GγG0_ext(t, t′; model = model), GγL_bath, GγG_bath, zero(GfL), zero(GfG), zero(GbL), zero(GbG), zero(GaL), zero(GaG), zero(GaL), zero(GaG), zero(GbL), zero(GbG), zero(GbL), zero(GbG), zero(GfL), zero(GfG))
+    data = PhotonAssistedModelData(𝒢cL, 𝒢cG, GcL, GcG, GcL_bath, GcG_bath, GfL, GfG, GbL, GbG, GaL, GaG, (t, t′) -> GγL0_ext(t, t′; model = model), (t, t′) -> GγG0_ext(t, t′; model = model), GγL_bath, GγG_bath, zero(GfL), zero(GfG), zero(GbL), zero(GbG), zero(GaL), zero(GaG), zero(GaL), zero(GaG), zero(GbL), zero(GbG), zero(GbL), zero(GbG), zero(GfL), zero(GfG))
 
     # Initialize self-energies
     for t1 in eachindex(t0), t2 in eachindex(t0)
-        calculate_Σt!(t0, nothing, nothing, t1, t2, model, data; dmft = dmft)
+        calculate_Σt!(t0, nothing, nothing, t1, t2, model, data)
     end
 
     @testset "Sanity checks" begin
@@ -151,12 +177,12 @@ function PhotonAssistedAIMData(; data_eq, model::PhotonAssistedAIM, timematrix, 
         end
 
         @testset "Self-energies" begin
-            @test data.ΣbG.data ≈ G∞(Στ[r, 1]) rtol = rtol atol = 1e-3 * rtol
-            @test data.ΣfG.data ≈ G∞(Στ[r, 2]) rtol = rtol atol = 1e-3 * rtol
-            @test data.ΣaG.data ≈ G∞(Στ[r, 3]) rtol = rtol atol = 1e-3 * rtol
-            @test data.ΣbL.data ≈ G∞(Στ[r, 4]) rtol = rtol atol = 1e-3 * rtol
-            @test data.ΣfL.data ≈ G∞(Στ[r, 5]) rtol = rtol atol = 1e-3 * rtol
-            @test data.ΣaL.data ≈ G∞(Στ[r, 6]) rtol = rtol atol = 1e-3 * rtol
+            @test data.ΣbG.data ≈ G∞(Στ[r, 1]) rtol = rtol atol = atol
+            @test data.ΣfG.data ≈ G∞(Στ[r, 2]) rtol = rtol atol = atol
+            @test data.ΣaG.data ≈ G∞(Στ[r, 3]) rtol = rtol atol = atol
+            @test data.ΣbL.data ≈ G∞(Στ[r, 4]) rtol = rtol atol = atol
+            @test data.ΣfL.data ≈ G∞(Στ[r, 5]) rtol = rtol atol = atol
+            @test data.ΣaL.data ≈ G∞(Στ[r, 6]) rtol = rtol atol = atol
         end
 
         if timematrix
@@ -166,8 +192,8 @@ function PhotonAssistedAIMData(; data_eq, model::PhotonAssistedAIM, timematrix, 
                 # If not satisfied, it usually suffices to increase the *boundaries* of the frequency grid
                 # since they control how fine Δτ is. If the temperature is very low, it is also a good idea
                 # to increase the number `nK` of Kondo time-scales included in the initial timematrix
-                @test sum(~Στ[r, 1] .* GLτ[r, 1] - ~Στ[r, 4] .* GGτ[r, 1]) * (τs[2] - τs[1]) ≈ sum(~Στ[:, 1] .* GLτ[:, 1] - ~Στ[:, 4] .* GGτ[:, 1]) * (τs[2] - τs[1]) rtol = rtol atol = 1e-3 * rtol
-                @test sum(~Στ[r, 2] .* GLτ[r, 2] - ~Στ[r, 5] .* GGτ[r, 2]) * (τs[2] - τs[1]) ≈ sum(~Στ[:, 2] .* GLτ[:, 2] - ~Στ[:, 5] .* GGτ[:, 2]) * (τs[2] - τs[1]) rtol = rtol atol = 1e-3 * rtol
+                @test sum(~Στ[r, 1] .* GLτ[r, 1] - ~Στ[r, 4] .* GGτ[r, 1]) * (τs[2] - τs[1]) ≈ sum(~Στ[:, 1] .* GLτ[:, 1] - ~Στ[:, 4] .* GGτ[:, 1]) * (τs[2] - τs[1]) rtol = rtol atol = atol
+                @test sum(~Στ[r, 2] .* GLτ[r, 2] - ~Στ[r, 5] .* GGτ[r, 2]) * (τs[2] - τs[1]) ≈ sum(~Στ[:, 2] .* GLτ[:, 2] - ~Στ[:, 5] .* GGτ[:, 2]) * (τs[2] - τs[1]) rtol = rtol atol = atol
             end
         end
     end
@@ -175,7 +201,7 @@ function PhotonAssistedAIMData(; data_eq, model::PhotonAssistedAIM, timematrix, 
     return (; data, t0)
 end
 
-function resize_Σ!(data::PhotonAssistedAIMData; resize = false)
+function resize_Σ!(data::PhotonAssistedModelData; resize = false)
     if (n = size(data.GfL, 2)) > size(data.ΣfL, 2) || resize
         resize!(data.ΣbL, n)
         resize!(data.ΣbG, n)

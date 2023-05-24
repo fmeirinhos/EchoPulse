@@ -19,8 +19,8 @@ begin
     using Pkg
     Pkg.activate()
     
-    using LinearAlgebra: diag
-    using KadanoffBaym, LangrethsRules
+    using LinearAlgebra: diag, LowerTriangular
+    using KadanoffBaym
 
     const EchoPulse = ingredients("../src/EchoPulse.jl")
 
@@ -67,7 +67,7 @@ begin
     β = 2e2
 
     # model parameters
-    model = EchoPulse.PhotonAssistedAIM(
+    model = EchoPulse.PhotonAssistedModel(
         # siam
         ;
         V0 = sqrt(0.08), # Hybridization strength
@@ -85,11 +85,10 @@ begin
         Ω0 = 8.0e-2, # Photon spectral width
 		Nγ = 5.0e0, # Photon pulse maximum average occupation
 		tγ = 2.5e2, # Photon pulse peak time
+
+    	dmft = true # Bethe lattice dmft
     )
 
-    # Bethe lattice dmft
-    dmft = true
-	
     # maximum integration time parameters
     tmax = 1.0e3
 end;
@@ -99,7 +98,6 @@ end;
 	model = model, 
 	ωs = range(-14.0, 14.0; length = 2^14 - 1), 
 	β = β, 
-	dmft = dmft, 
 	KMS = true);
 
 # ╔═╡ 21895ece-5cf4-4f6f-b851-44d4fefb1788
@@ -164,23 +162,23 @@ let
 	)
 end
 
-# ╔═╡ e980712b-771d-497a-969a-b91afd231939
-@time (; data, t0) = EchoPulse.PhotonAssistedAIMData(
+# ╔═╡ db46311b-40b3-418f-90ca-ab30fd1d031b
+@time (; data, t0) = EchoPulse.PhotonAssistedModelData(
 	data_eq = data_eq, 
 	model = model, 
-	dmft = dmft, 
 	timematrix = true, 
-	nτK = 8.0,
-	rtol = 1e-5);
+	nτK = 19.0,
+	rtol = 1.0e-4,
+	nmax = 6200);
 
 # ╔═╡ 6c62195c-da9e-43dc-b091-3513fb117274
 @time (; Gd, Gc, Gγ0_ext, Gγ_ext, Gγ_vac, ts, ws) = EchoPulse.solve(
 	data = data,
 	model = model,
 	t0 = t0,
-	tmax = 0.0,
-	dmft = dmft,
+	tmax = tmax,
 	rtol = 1e-5,
+	kmax_vie = 5
 );
 
 # ╔═╡ d290ffe2-531c-4f12-bd08-1a282716d8ad
@@ -263,7 +261,7 @@ varinfo(@__MODULE__, imported=true)
 # ╠═37eaf255-9d32-48e1-bb1a-f73394ae754c
 # ╟─21895ece-5cf4-4f6f-b851-44d4fefb1788
 # ╟─1ecc4622-b311-47bd-8ba0-d6effa01fa35
-# ╠═e980712b-771d-497a-969a-b91afd231939
+# ╠═db46311b-40b3-418f-90ca-ab30fd1d031b
 # ╠═6c62195c-da9e-43dc-b091-3513fb117274
 # ╟─d290ffe2-531c-4f12-bd08-1a282716d8ad
 # ╠═ebbdba0e-450c-4427-b626-6bf66afe2b37

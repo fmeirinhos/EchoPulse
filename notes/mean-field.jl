@@ -262,7 +262,7 @@ end;
 # 	for Nγ in [1e-1, 5e-1, 1e0, 2e0, 4e0, 6e0, 8e0][[3]]
 # 		for V0 in sqrt.([0.0925, 0.1084, 0.1243, 0.1561, 0.2038, 0.2674, 0.3628, 0.49])[[1:2]]
 # 			for ε0f in [-0.2, -0.25, -0.3, -0.35, -0.4, -0.45][[4]]
-# 				pam = EchoPulse.PhotonAssistedAIM(
+# 				pam = EchoPulse.PhotonAssistedModel(
 # 					V0 = V0, 
 # 					ε0f = ε0f,
 # 					Γ0 = sqrt(0.002),
@@ -284,7 +284,7 @@ end;
 
 # 	serialize("../data/$(str).jls", (
 # 		sols= [(t = s.t, u = s.u) for s in sols], 
-# 		pams = [Dict(key=>getfield(p, key) for key ∈ fieldnames(EchoPulse.PhotonAssistedAIM)) for p in pams])
+# 		pams = [Dict(key=>getfield(p, key) for key ∈ fieldnames(EchoPulse.PhotonAssistedModel)) for p in pams])
 # 	)
 # end
 

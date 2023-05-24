@@ -1,7 +1,13 @@
 """
 Solves the problem in equilibrium
+
+# Parameters
+    - `model::PhotonAssistedModel`: A struct with model parameters
+    - `ωs::Vector`: The frequency grid
+    - `β::Number`: The inverse temperature
+    - `KMS::Bool`: Whether to use KMS boundary conditions or have temperature fixed by the bath(s)
 """
-function solve_eq(; model, ωs, β, KMS, dmft)
+function solve_eq(; model::PhotonAssistedModel, ωs, β, KMS)
     @assert isodd(length(ωs)) && first(ωs) == -last(ωs) "Must hold for double `ft` to be an identity."
 
     # Discrete Fourier grid of ωs
@@ -43,7 +49,7 @@ function solve_eq(; model, ωs, β, KMS, dmft)
             ΣcLω = @views ft_τ(Στ[:, 8])
             ΣcKω = im * imag(2 * (ΣcLω + im * imag(ΣcRω)))
 
-            (; GRω, GLω, 𝒢cω, Gcω) = calculate_Gω(ωs, model, (; ΣRω, ΣLω, ΣcRω, ΣcKω, Gcω_bath); dmft)
+            (; GRω, GLω, 𝒢cω, Gcω) = calculate_Gω(ωs, model, (; ΣRω, ΣLω, ΣcRω, ΣcKω, Gcω_bath))
 
             # GR(ω) –> G>(τ) & G<(ω) –> G<(τ)
             GGτ = mapslices(x -> ft_ω(+im * 2imag(x)), GRω; dims = 1)
@@ -52,7 +58,7 @@ function solve_eq(; model, ωs, β, KMS, dmft)
             𝒢cGτ = ft_ω(KMS ? +im * 2imag(𝒢cω[:, 1, 1]) .* nf.(-ωs, β) : im * imag(0.5 * 𝒢cω[:, 1, 2] + im * imag(𝒢cω[:, 1, 1])))
             𝒢cLτ = ft_ω(KMS ? -im * 2imag(𝒢cω[:, 1, 1]) .* nf.(+ωs, β) : im * imag(0.5 * 𝒢cω[:, 1, 2] - im * imag(𝒢cω[:, 1, 1])))
 
-            (; ΣGτ, ΣLτ, GdGτ, GdLτ, TcGτ, TcLτ) = calculate_Στ(model, (; GGτ, GLτ, 𝒢cGτ, 𝒢cLτ, GγG0τ = GγG0τ_ext + model.α2^2 * GγGτ_bath, GγL0τ = GγL0τ_ext + model.α2^2 * GγLτ_bath))
+            (; ΣGτ, ΣLτ, GdGτ, GdLτ, TcGτ, TcLτ) = calculate_Στ(model, (; GGτ, GLτ, 𝒢cGτ, 𝒢cLτ, GγG0τ_ext, GγGτ_bath, GγL0τ_ext, GγLτ_bath))
 
             TcRω = ft_τ((TcGτ - TcLτ) .* Θτ)
             TcKω = im * imag(ft_τ(TcGτ + TcLτ))
@@ -84,38 +90,46 @@ function solve_eq(; model, ωs, β, KMS, dmft)
     end
 
     # Determine the Kondo energy scale
-    ωK = kondo_temperature_from_fit(ωs, GdRω, model.ε0f)
+    ωK = kondo_temperature_from_fit(ωs, GdRω, model.ε0f, model.U0)
 
     (; 𝒢cLτ, 𝒢cGτ, GcGτ, GcLτ, GLτ, GGτ, GcLτ_bath, GcGτ_bath, GγLτ_bath, GγGτ_bath, Στ, GcRω, 𝒢cωR, GdRω, ωs, τs, ωK, τK = inv(ωK))
 end
 
 """
 Solves the problem in non-equilibrium
+
+# Parameters
+    - `model::PhotonAssistedModel`: A struct with model parameters
+    - `data::PhotonAssistedModelData`: A struct with all data required
+    - `t0`: The initial time(s) (either a scalar or a vector)
+    - `tmax::Number`: The maximum integration time
+    - `rtol`: See KadanoffBaym.kbsolve!
+    - `kmax_vie`: See KadanoffBaym.kbsolve!
 """
-function solve(; model, data, t0, tmax, dmft, rtol)
+function solve(; model, data, t0, tmax, rtol, kmax_vie)
     # Integrate
     ts, ws = kbsolve!(
-        (x...) -> fv!(x..., model, data; dmft = dmft), 
-        (x...) -> fd!(x..., model, data; dmft = dmft), 
-        (u0 = [data.GbL, data.GbG, data.GfL, data.GfG, data.GaL, data.GaG]; dmft ? [u0; [data.𝒢cL, data.𝒢cG, data.GcL, data.GcG]] : u0), (t0, tmax); 
+        (x...) -> fv!(x..., model, data), 
+        (x...) -> fd!(x..., model, data), 
+        (u0 = [data.GbL, data.GbG, data.GfL, data.GfG, data.GaL, data.GaG]; model.dmft ? [u0; [data.𝒢cL, data.𝒢cG, data.GcL, data.GcG]] : u0), (t0, tmax); 
         rtol = rtol, 
         atol = 1e-3 * rtol, 
         dtini = 1e-8, 
-        kmax_vie = 7, 
+        kmax_vie = kmax_vie, 
         callback = (x...) -> begin
             resize_Σ!(data)
-            calculate_Σt!(x..., model, data; dmft = dmft)
+            calculate_Σt!(x..., model, data)
         end, 
         stop = (x...) -> begin
             println(" t: $(round(last(x[1]), digits=3))")
-            (x[1][end] - x[1][end-1]) < 5e-12
+            (x[1][end] - x[1][end-1]) < 5e-12 # stops if solver gets stuck
         end)
 
     # Post processing
     resize_Σ!(data; resize = true)
 
     # Calculate observables
-    (; Gd, Gc, Gγ0_ext, Gγ_ext, Gγ_vac) = project(data, model; ts = ts, ws = ws, dmft = dmft)
+    (; Gd, Gc, Gγ0_ext, Gγ_ext, Gγ_vac) = project(data, model; ts = ts, ws = ws)
 
     (; Gd, Gc, Gγ0_ext, Gγ_ext, Gγ_vac, ts, ws)
 end

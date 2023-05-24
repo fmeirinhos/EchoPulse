@@ -4,7 +4,6 @@ using SpecialFunctions
 using NLsolve
 
 using KadanoffBaym
-using LangrethsRules
 
 using FFTW
 

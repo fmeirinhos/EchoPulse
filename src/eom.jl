@@ -1,5 +1,7 @@
-""" Calculates GR(ω) and G<(ω) """
-function calculate_Gω(ωs, model, data; dmft)
+"""
+Calculates GR(ω) and G<(ω) in equilibrium (or steady-state)
+"""
+function calculate_Gω(ωs, model, data)
     (; ΣRω, ΣLω, ΣcRω, ΣcKω, Gcω_bath) = data
 
     GRω = zero(ΣRω)
@@ -37,8 +39,10 @@ function calculate_Gω(ωs, model, data; dmft)
     return (; GRω, GLω, 𝒢cω, Gcω)
 end
 
-""" The rhs of ∂/∂t G<(t,t') and ∂/∂t G>(t,t') """
-function fv!(out, ts, w1, w2, t1, t2, model::PhotonAssistedAIM, data::PhotonAssistedAIMData; dmft)
+"""
+The rhs of ∂/∂t G<(t,t') and ∂/∂t G>(t,t')
+"""
+function fv!(out, ts, w1, w2, t1, t2, model::PhotonAssistedModel, data::PhotonAssistedModelData)
     (; GfL, GfG, GbL, GbG, GaL, GaG, ΣfL, ΣfG, ΣbL, ΣbG, ΣaL, ΣaG, 𝒢cL, 𝒢cG, GcL, GcG, ΔcL, ΔcG, TcL, TcG) = data
 
     ∫dt1(A, B) = sum(w1[i] * A[t1, i] * B[i, t2] for i in eachindex(w1))
@@ -59,7 +63,7 @@ function fv!(out, ts, w1, w2, t1, t2, model::PhotonAssistedAIM, data::PhotonAssi
     out[5] = -im * (isinf(model.U0) ? 0.0 : (model.ε0f + model.U0) * GaL[t1, t2] + ∫dt1(ΣaG, GaL) - ∫dt2(ΣaL, GaG))
     out[6] = -im * (isinf(model.U0) ? 0.0 : (model.ε0f + model.U0) * GaG[t1, t2] + ∫dt1(ΣaG, GaG) - ∫dt2(ΣaG, GaG))
 
-    if dmft
+    if model.dmft
         # weiss conduction electron
         out[7] = -im * (∫dt1(ΔcG, ΔcL, 𝒢cL) - ∫dt2(ΔcL, 𝒢cG, 𝒢cL))
         out[8] = -im * (∫dt1(ΔcG, ΔcL, 𝒢cG) - ∫dt2(ΔcG, 𝒢cG, 𝒢cL))
@@ -72,8 +76,10 @@ function fv!(out, ts, w1, w2, t1, t2, model::PhotonAssistedAIM, data::PhotonAssi
     return out
 end
 
-""" The rhs of (∂/∂t + ∂/∂t') G<(t,t') and (∂/∂t + ∂/∂t') G>(t,t') at t = t' """
-function fd!(out, ts, w1, w2, t1, t2, model::PhotonAssistedAIM, data::PhotonAssistedAIMData; dmft)
-    fv!(out, ts, w1, w2, t1, t2, model, data, dmft = dmft)
+"""
+The rhs of (∂/∂t + ∂/∂t') G<(t,t') and (∂/∂t + ∂/∂t') G>(t,t') at t = t'
+"""
+function fd!(out, ts, w1, w2, t1, t2, model::PhotonAssistedModel, data::PhotonAssistedModelData)
+    fv!(out, ts, w1, w2, t1, t2, model, data)
     @. out -= conj(out)
 end
