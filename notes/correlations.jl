@@ -184,78 +184,53 @@ end
 
 # ╔═╡ d290ffe2-531c-4f12-bd08-1a282716d8ad
 let
-	# Trim data
-	i1 = findmin(x -> abs(x + tmax), ts)[2]
-	i2 = findmin(x -> abs(x - tmax), ts)[2]
+    # Trimmed Wigner transforms
+    wt(x) = let
+            r = findmin(x -> abs(x + tmax), ts)[2]:findmin(x -> abs(x - tmax), ts)[2]
+            EchoPulse.wigner_transform_itp(x[r, r], ts[r]; fourier = true, ts_lin = range(ts[r[1]], ts[r[end]], step = ts[r[2]] - ts[r[1]]))
+        end
 
-	Gd = @views (L = lesser(Gd)[i1:i2, i1:i2], G = greater(Gd)[i1:i2, i1:i2])
-	Gc = @views (L = lesser(Gc)[i1:i2, i1:i2], G = greater(Gc)[i1:i2, i1:i2])
-	Gγ0_ext = @views (L = lesser(Gγ0_ext)[i1:i2, i1:i2], G = greater(Gγ0_ext)[i1:i2, i1:i2])
-	Gγ_vac = @views (L = lesser(Gγ_vac)[i1:i2, i1:i2], G = greater(Gγ_vac)[i1:i2, i1:i2])
-	Gγ_ext = @views (L = lesser(Gγ_ext)[i1:i2, i1:i2], G = greater(Gγ_ext)[i1:i2, i1:i2])
+    ρd_ω, (ωs, Ts) = wt(greater(Gd) - lesser(Gd))
+    GdL_ω, _ = wt(lesser(Gd))
 
-	ts = ts[i1:i2]
-	ts_lin = range(first(ts), last(ts), step=ts[2] - ts[1])
-	
-	# Wigner transforms
-	ρd_ω, (ωs, Ts) = EchoPulse.wigner_transform_itp(
-		Gd.G - Gd.L, ts; fourier = true, ts_lin)
-	GdL_ω, _ = EchoPulse.wigner_transform_itp(Gd.L, ts; fourier = true, ts_lin)
+    ρc_ω, _ = wt(greater(Gc) - lesser(Gc))
+    GcL_ω, _ = wt(lesser(Gc))
 
-	ρc_ω, _ = EchoPulse.wigner_transform_itp(
-		Gc.G - Gc.L, ts; fourier = true, ts_lin)
-	GcL_ω, _ = EchoPulse.wigner_transform_itp(Gc.L, ts; fourier = true, ts_lin)
+    ργ_ω, _ = wt(greater(Gγ_ext) - lesser(Gγ_ext))
+    GγL_ω, _ = wt(lesser(Gγ_ext))
 
-	ργ_ω, _ = EchoPulse.wigner_transform_itp(
-		Gγ_ext.G - Gγ_ext.L, ts; fourier = true, ts_lin)
-	GγL_ω, _ = EchoPulse.wigner_transform_itp(Gγ_ext.L, ts; fourier = true, ts_lin)
+    GγL_vac, _ = wt(lesser(Gγ_vac))
 
-	GγL_vac, _ = EchoPulse.wigner_transform_itp(Gγ_vac.L, ts; fourier = true, ts_lin)
+    # DMFT baby
+    GcR_ω, _ = wt(LowerTriangular(data.GcG.data - data.GcL.data))
+    𝒢cR_ω, _ = wt(LowerTriangular(data.𝒢cG.data - data.𝒢cL.data))
+    TcR_ω, _ = wt(LowerTriangular(data.TcG.data - data.TcL.data))
+    ΣcR_ω = mapreduce(x -> x[1] .* x[2] ./ x[3], hcat, zip(eachcol(TcR_ω), eachcol(𝒢cR_ω), eachcol(GcR_ω)))
 
-	# DMFT baby
-	GcR_ω, _ = EchoPulse.wigner_transform_itp(
-		LowerTriangular(data.GcG[i1:i2, i1:i2] - data.GcL[i1:i2, i1:i2]), ts; fourier = true, ts_lin)
-	𝒢cR_ω, _ = @views EchoPulse.wigner_transform_itp(
-		LowerTriangular(data.𝒢cG[i1:i2, i1:i2] - data.𝒢cL[i1:i2, i1:i2]), ts; fourier = true, ts_lin)
-	TcR_ω, _ = @views EchoPulse.wigner_transform_itp(
-		LowerTriangular(data.TcG[i1:i2, i1:i2] - data.TcL[i1:i2, i1:i2]), ts; fourier = true, ts_lin)
-	ΣcR_ω = mapreduce(x -> x[1] .* x[2] ./ x[3], hcat, zip(eachcol(TcR_ω), eachcol(𝒢cR_ω), eachcol(GcR_ω)));
-	
-	serialize(
-		"../data/special-run-99.jls",
-		(;
-			params = (;
-				V0 = model.V0,
-				ε0f = model.ε0f,
-				U0 = model.U0,
-				Γ0 = model.Γ0,
-				ω0 = model.ω0,
-				Ω0 = model.Ω0,
-				α1 = model.α1,
+    serialize(
+        "../data/special-run-99.jls",
+        (;
+            params = (;
+                V0 = model.V0,
+                ε0f = model.ε0f,
+                U0 = model.U0,
+                Γ0 = model.Γ0,
+                ω0 = model.ω0,
+                Ω0 = model.Ω0,
+                α1 = model.α1,
                 α2 = model.α2,
-				Nγ = model.Nγ,
-				tγ = model.tγ,
-				cutoff = model.cutoff,
-				τK = data_eq.τK,
-				ωK = data_eq.ωK,
-				β = β,
-			),
-
-			Ts = Ts,
-			ωs = ωs,
-
-			data = (;
-				ρd_ω,
-				GdL_ω,
-				ρc_ω,
-				GcL_ω,
-				ργ_ω,
-				GγL_ω,
-				GγL_vac,
-				ΣcR_ω
-				),
-		),
-	)
+                Nγ = model.Nγ,
+                tγ = model.tγ,
+                cutoff = model.cutoff,
+                τK = data_eq.τK,
+                ωK = data_eq.ωK,
+                β = β,
+            ),
+            Ts = Ts,
+            ωs = ωs,
+            data = (; ρd_ω, GdL_ω, ρc_ω, GcL_ω, ργ_ω, GγL_ω, GγL_vac, ΣcR_ω),
+        ),
+    )
 end
 
 # ╔═╡ 44cd66c0-aada-47af-91bd-c2368b69ee4b
