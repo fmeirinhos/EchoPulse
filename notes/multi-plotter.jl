@@ -80,19 +80,19 @@ end
 
 # ╔═╡ 22c04e92-eaa8-4ca2-8388-9ba24db1672f
 begin
-	str = "rrun"
+	str = "data-e-n"
 	list_j = [-0.35, -0.39]
 	list_k = [1.0, 3.0, 5.0, 7.0, 10.]
 
-	# str = "run-run-run"
+	# str = "data-o-o"
 	# list_j = [5.0e-3, 1.0e-3, 5.0e-2, 1e-1, 5.0e-1, 1e-4, 5e-4] # ω0
 	# list_k = [6.0e-2, 9.0e-2, 2e-1] # Ω0
-	
-	# str = "new-run"
+
+	# str = "data-beta"
 	# list_j = [nothing] # ε0f
 	# list_k = [1e0, 3e0, 7e0, 1e1, 1.5e1, 3e1, 5e1, 8.5e1, 1e2, 1.5e2, 1.9e2]
 
-	# str = "run-run-run-run"
+	# str = "data-e-a1"
 	# list_j = [-0.35, -0.39]
 	# list_k = [sqrt(0.02),  sqrt(0.03), sqrt(0.04), sqrt(0.05)]
 end;
@@ -149,7 +149,7 @@ end;
 
 # ╔═╡ ce2c9fca-1345-457e-b43b-5c11ff8f14db
 let
-	@assert str == "new-run"
+	@assert str == "data-beta"
 
 	r = eachindex(list_k)
 	
@@ -282,7 +282,7 @@ end
 
 # ╔═╡ 8af64e39-b83c-48d0-aea9-cd90ddcec879
 let
-	@assert str == "rrun"
+	@assert str == "data-e-n"
 	# r = reshape(eachindex(_Ts), length(list_k), length(list_j))
 	r = reshape(eachindex(_Ts)[1:5], length(list_k), 1)
 
@@ -467,7 +467,7 @@ end
 
 # ╔═╡ 6001df42-9cc0-483f-9578-e56e4c8ddf8f
 let
-	@assert str == "run-run-run-run"
+	@assert str == "data-e-a1"
 	r = reshape(eachindex(_Ts), length(list_k), length(list_j))
 	r = r[sortperm(list_k), :]
 	
@@ -570,7 +570,7 @@ end
 
 # ╔═╡ dc8dc52c-3900-4bfa-a1b4-12b5f487fe0b
 let
-	@assert str == "run-run-run"
+	@assert str == "data-o-o"
 	r = reshape(eachindex(_Ts), length(list_k), length(list_j))
 	r = r[:, sortperm(list_j)]
 	r = r[1:3, [1,5]]'
